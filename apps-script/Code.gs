@@ -21,11 +21,15 @@ const TH_D = ['อา.','จ.','อ.','พ.','พฤ.','ศ.','ส.'];
 const ST_TH = { ok: 'มา', late: 'สาย', absent: 'ขาด', leave: 'ลา', pending: 'ยังไม่เข้างาน', holiday: 'วันหยุด', off: 'วันหยุดประจำสัปดาห์', future: '' };
 
 /* ===================== Web API ===================== */
-function doGet(e) { return json_({ ok: true, data: 'TESR Time Clock API' }); }
+/** GET = ปลุกเซิร์ฟเวอร์ + เตรียมแคชตารางไว้ล่วงหน้า (หน้าเว็บเรียกตอนเปิดหน้า ระหว่างที่ผู้ใช้กำลังพิมพ์รหัส) */
+function doGet(e) {
+  try { const A = SheetsAdapter_({ readOnly: true }); A.getSettings(); Object.keys(TC.TABLES).forEach(k => A.rows(TC.TABLES[k])); } catch (err) {}
+  return json_({ ok: true, data: 'TESR Time Clock API' });
+}
 function doPost(e) {
   let p = {};
   try { p = JSON.parse(e.postData.contents); } catch (err) {}
-  return json_(TC.handle(SheetsAdapter_(), p));
+  return json_(TC.handle(SheetsAdapter_({ readOnly: !TC.WRITES[p.action] }), p));
 }
 function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
 
@@ -34,6 +38,7 @@ function setup() {
   const ss = SpreadsheetApp.getActive();
   ss.setSpreadsheetTimeZone(TZ);
   Object.keys(TC.TABLES).forEach(k => ensureTable_(TC.TABLES[k]));
+  Object.keys(TC.TABLES).forEach(k => tcDrop_(TC.TABLES[k].name)); tcDrop_('Settings');
   const set = ensureSettings_();
   const cur = readSettingsRaw_();
   Object.keys(TC.DEFAULTS).forEach(k => { if (!(k in cur)) set.appendRow([k, String(TC.DEFAULTS[k])]); });
@@ -86,36 +91,81 @@ function internalAdminToken_(A, now) {
   return p + '.' + A.hmac(p);
 }
 
+/* ===================== แคชตาราง (ให้หน้าเว็บโหลดเร็วขึ้น) =====================
+ * คำสั่งที่อ่านอย่างเดียว ใช้ข้อมูลตารางจาก CacheService (เร็วกว่าอ่านชีตมาก) นานสุด 5 นาที
+ * ทุกครั้งที่ระบบเขียนข้อมูล หรือมีคนแก้ชีตด้วยมือ (onEdit) แคชของตารางนั้นจะถูกล้างทันที
+ * คำสั่งที่เขียนข้อมูลอ่านจากชีตจริงเสมอ จึงไม่มีทางเขียนทับข้อมูลผิดแถว */
+const TCACHE_TTL = 300, TCHUNK = 90000;
+function tcGen_(sc, name) { let g = sc.get('g:' + name); if (!g) { g = Utilities.getUuid().slice(0, 8); sc.put('g:' + name, g, 21600); } return g; }
+function tcDrop_(name) { try { CacheService.getScriptCache().put('g:' + name, Utilities.getUuid().slice(0, 8), 21600); } catch (e) {} }
+function tcGet_(sc, name, g) {
+  const meta = sc.get('tb:' + name + ':' + g); if (!meta) return null;
+  const n = Number(meta), keys = []; for (let i = 0; i < n; i++) keys.push('tb:' + name + ':' + g + ':' + i);
+  const got = sc.getAll(keys); let str = '';
+  for (const k of keys) { if (got[k] == null) return null; str += got[k]; }
+  try { return JSON.parse(str); } catch (e) { return null; }
+}
+function tcPut_(sc, name, g, data) {
+  const str = JSON.stringify(data); if (str.length > 1500000) return;
+  const n = Math.ceil(str.length / TCHUNK) || 1, parts = {};
+  for (let i = 0; i < n; i++) parts['tb:' + name + ':' + g + ':' + i] = str.substr(i * TCHUNK, TCHUNK);
+  if (sc.get('g:' + name) !== g) return; // มีการเขียนระหว่างที่อ่าน → ไม่เก็บ
+  sc.putAll(parts, TCACHE_TTL); sc.put('tb:' + name + ':' + g, String(n), TCACHE_TTL);
+}
+/** แก้ชีตด้วยมือ → ล้างแคชของชีตนั้น */
+function onEdit(e) { try { tcDrop_(e.range.getSheet().getName()); } catch (err) {} }
+
 /* ===================== Sheets adapter ===================== */
-function SheetsAdapter_() {
+function SheetsAdapter_(opts) {
+  opts = opts || {};
   const ss = SpreadsheetApp.getActive();
   const cache = {};
   const secret = PropertiesService.getScriptProperties().getProperty('SECRET') || 'tesr-time-clock';
   const sc = CacheService.getScriptCache();
-  function load(t) {
-    if (cache[t.name]) return cache[t.name];
-    const sh = ensureTable_(t), v = sh.getDataRange().getValues(), head = v[0].map(String);
+  const useCache = !!opts.readOnly;
+  let settingsMemo = null;
+  function readSheet(t) {
+    let sh = ss.getSheetByName(t.name);
+    if (!sh) sh = ensureTable_(t);
+    let v = sh.getDataRange().getValues(), head = v[0].map(String);
+    if (t.cols.some(c => head.indexOf(c) < 0)) { ensureTable_(t); v = sh.getDataRange().getValues(); head = v[0].map(String); }
     const out = [];
     for (let i = 1; i < v.length; i++) {
       const o = { _row: i + 1 }; let any = false;
       head.forEach((k, j) => { if (!k) return; o[k] = norm_(v[i][j], k); if (o[k] !== '') any = true; });
       if (any) out.push(o);
     }
-    cache[t.name] = { sh, head, rows: out };
-    return cache[t.name];
+    return { sh, head, rows: out };
   }
+  function load(t) {
+    if (cache[t.name]) return cache[t.name];
+    if (useCache) {
+      const g = tcGen_(sc, t.name), hit = tcGet_(sc, t.name, g);
+      if (hit) { cache[t.name] = { sh: null, head: hit.head, rows: hit.rows }; return cache[t.name]; }
+      const d = readSheet(t);
+      try { tcPut_(sc, t.name, g, { head: d.head, rows: d.rows }); } catch (e) {}
+      return (cache[t.name] = d);
+    }
+    return (cache[t.name] = readSheet(t));
+  }
+  function sheetOf(t, d) { if (!d.sh) d.sh = ss.getSheetByName(t.name) || ensureTable_(t); return d.sh; }
   function writeRow(t, row, obj) {
-    const d = load(t);
+    const d = load(t); tcDrop_(t.name);
     const vals = d.head.map(k => obj[k] === undefined || obj[k] === null ? '' : String(obj[k]));
-    d.sh.getRange(row, 1, 1, d.head.length).setNumberFormat('@').setValues([vals]);
+    sheetOf(t, d).getRange(row, 1, 1, d.head.length).setNumberFormat('@').setValues([vals]);
   }
   return {
     rows: t => load(t).rows,
-    insert(t, obj) { const d = load(t); const row = d.sh.getLastRow() + 1; writeRow(t, row, obj); const o = Object.assign({ _row: row }, obj); d.rows.push(o); return o; },
-    update(t, ref, patch) { const d = load(t); Object.assign(ref, patch); writeRow(t, ref._row, ref); },
-    remove(t, ref) { const d = load(t); d.sh.deleteRow(ref._row); delete cache[t.name]; },
-    getSettings: readSettingsRaw_,
+    insert(t, obj) { const d = load(t); const row = sheetOf(t, d).getLastRow() + 1; writeRow(t, row, obj); const o = Object.assign({ _row: row }, obj); d.rows.push(o); return o; },
+    update(t, ref, patch) { load(t); Object.assign(ref, patch); writeRow(t, ref._row, ref); },
+    remove(t, ref) { const d = load(t); tcDrop_(t.name); sheetOf(t, d).deleteRow(ref._row); delete cache[t.name]; },
+    getSettings() {
+      if (settingsMemo) return settingsMemo;
+      if (useCache) { const g = tcGen_(sc, 'Settings'), hit = tcGet_(sc, 'Settings', g); if (hit) return (settingsMemo = hit); settingsMemo = readSettingsRaw_(); try { tcPut_(sc, 'Settings', g, settingsMemo); } catch (e) {} return settingsMemo; }
+      return (settingsMemo = readSettingsRaw_());
+    },
     setSetting(k, v) {
+      settingsMemo = null; tcDrop_('Settings');
       const sh = ensureSettings_(), vals = sh.getDataRange().getValues();
       for (let i = 1; i < vals.length; i++) if (String(vals[i][0]) === k) { sh.getRange(i + 1, 2).setNumberFormat('@').setValue(String(v)); return; }
       sh.appendRow([k, String(v)]);
@@ -141,8 +191,10 @@ function SheetsAdapter_() {
     getSelfie(id) {
       let f; try { f = DriveApp.getFileById(id); } catch (e) { return ''; }
       if (f.isTrashed()) return '';
-      const folderId = selfieFolder_().getId(), parents = f.getParents();
-      let inside = false; while (parents.hasNext()) if (parents.next().getId() === folderId) inside = true;
+      const all = PropertiesService.getScriptProperties().getProperties(), ok = {};
+      Object.keys(all).forEach(k => { if (k.indexOf('SELFIE_FOLDER') === 0) ok[all[k]] = 1; });
+      const parents = f.getParents();
+      let inside = false; while (parents.hasNext()) if (ok[parents.next().getId()]) inside = true;
       if (!inside) return '';
       return 'data:image/jpeg;base64,' + Utilities.base64Encode(f.getBlob().getBytes());
     },
@@ -184,21 +236,22 @@ function norm_(v, k) {
   const s = v === null || v === undefined ? '' : String(v).trim();
   return /^\d:\d\d$/.test(s) ? '0' + s : s;
 }
-function photoFolder_() {
-  const props = PropertiesService.getScriptProperties(), id = props.getProperty('PHOTO_FOLDER');
-  if (id) { try { return DriveApp.getFolderById(id); } catch (e) {} }
-  const f = DriveApp.createFolder('TESR Time Clock · Photos');
-  props.setProperty('PHOTO_FOLDER', f.getId());
+/** โฟลเดอร์เก็บรูป: ถ้าตั้ง "driveFolder" (ลิงก์หรือ ID) ในหน้าตั้งค่า จะสร้างโฟลเดอร์ย่อยไว้ในนั้น */
+function subFolder_(propKey, name, fallbackName) {
+  const props = PropertiesService.getScriptProperties();
+  const m = String(readSettingsRaw_().driveFolder || '').match(/[-\w]{20,}/), parentId = m ? m[0] : '';
+  const key = propKey + (parentId ? ':' + parentId : ''), id = props.getProperty(key);
+  if (id) { try { const f = DriveApp.getFolderById(id); if (!f.isTrashed()) return f; } catch (e) {} }
+  let f;
+  if (parentId) {
+    const parent = DriveApp.getFolderById(parentId), it = parent.getFoldersByName(name);
+    f = it.hasNext() ? it.next() : parent.createFolder(name);
+  } else f = DriveApp.createFolder(fallbackName);
+  props.setProperty(key, f.getId());
   return f;
 }
-
-function selfieFolder_() {
-  const props = PropertiesService.getScriptProperties(), id = props.getProperty('SELFIE_FOLDER');
-  if (id) { try { return DriveApp.getFolderById(id); } catch (e) {} }
-  const f = DriveApp.createFolder('TESR Time Clock · Selfies (private)');
-  props.setProperty('SELFIE_FOLDER', f.getId());
-  return f;
-}
+function photoFolder_() { return subFolder_('PHOTO_FOLDER', 'รูปโปรไฟล์', 'TESR Time Clock · Photos'); }
+function selfieFolder_() { return subFolder_('SELFIE_FOLDER', 'เซลฟี่ลงเวลา (ส่วนตัว)', 'TESR Time Clock · Selfies (private)'); }
 /** ลบเซลฟี่ที่เก่ากว่าจำนวนวันที่ตั้งไว้ (Settings: selfieDays · 0 = เก็บตลอด) */
 function cleanupSelfies_() {
   const raw = readSettingsRaw_(), days = raw.selfieDays === undefined || raw.selfieDays === '' ? 90 : Number(raw.selfieDays);
@@ -275,7 +328,7 @@ function head_(rg) { rg.setFontWeight('bold').setBackground('#8B0000').setFontCo
  * ===================================================================== */
 var TC = (function () {
   var TABLES = {
-    EMP: { name: 'Employees', cols: ['id', 'code', 'name', 'gender', 'email', 'phone', 'position', 'photo', 'active', 'username', 'passHash', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note', 'shiftStart', 'shiftEnd', 'workdays', 'satStart', 'satEnd', 'dayTimes', 'deviceId', 'deviceAt'] },
+    EMP: { name: 'Employees', cols: ['id', 'code', 'name', 'gender', 'email', 'phone', 'position', 'photo', 'active', 'username', 'passHash', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note', 'shiftStart', 'shiftEnd', 'workdays', 'satStart', 'satEnd', 'dayTimes', 'deviceId', 'deviceAt', 'startDate'] },
     REC: { name: 'Records', cols: ['date', 'empId', 'code', 'name', 'in', 'out', 'lateMin', 'inDist', 'outDist', 'note', 'updatedAt', 'inPhoto', 'outPhoto', 'flag'] },
     LEAVE: { name: 'Leaves', cols: ['id', 'empId', 'code', 'name', 'type', 'start', 'end', 'part', 'days', 'reason', 'status', 'createdAt', 'decidedAt', 'decidedBy', 'adminNote'] },
     ADJ: { name: 'Adjustments', cols: ['id', 'empId', 'code', 'name', 'date', 'in', 'out', 'reason', 'status', 'createdAt', 'decidedAt', 'decidedBy', 'adminNote'] },
@@ -291,11 +344,12 @@ var TC = (function () {
     qPersonal: '7', qSick: '30', qVacation: '6', qMaternity: '0',
     adminUser: 'admin', adminHash: '', adminPassword: '',
     selfie: '1', deviceLock: 'warn', selfieDays: '90',
-    qrMode: 'static', qrVer: '1'
+    qrMode: 'static', qrVer: '1', startDate: '', driveFolder: ''
   };
   var DEFAULT_ADMIN_PASSWORD = 'tesr1234';
   var ADJ_WINDOW = 60; // ขอแก้เวลาย้อนหลังได้ไม่เกิน 60 วัน
-  var PUBLIC_SETTINGS = ['company', 'office', 'lat', 'lng', 'radius', 'start', 'end', 'grace', 'workdays', 'appUrl', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'selfie', 'deviceLock', 'selfieDays', 'qrMode'];
+  var PUBLIC_SETTINGS = ['company', 'office', 'lat', 'lng', 'radius', 'start', 'end', 'grace', 'workdays', 'appUrl', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'selfie', 'deviceLock', 'selfieDays', 'qrMode', 'startDate'];
+  var ADMIN_SETTINGS = ['driveFolder']; // แอดมินเห็น/แก้ได้ แต่ไม่ส่งให้พนักงาน
   var DEVICE_LOCK = { off: 'ไม่ตรวจ', warn: 'ให้ลงเวลาได้ แต่แจ้งเตือนแอดมิน', block: 'ไม่ให้ลงเวลา' };
   var WRITES = {
     login: 1, register: 1, punch: 1, photo: 1, changePassword: 1, leaveCreate: 1, leaveCancel: 1, adjCreate: 1,
@@ -386,6 +440,7 @@ var TC = (function () {
     s.deviceLock = DEVICE_LOCK[s.deviceLock] ? s.deviceLock : 'warn';
     s.selfieDays = Math.max(0, num(s.selfieDays, 90));
     s.qrMode = s.qrMode === 'daily' ? 'daily' : 'static';
+    s.startDate = isDate(s.startDate) ? s.startDate : '';
     return s;
   }
   function pubSettings(S) { var o = {}; PUBLIC_SETTINGS.forEach(function (k) { o[k] = S[k]; }); return o; }
@@ -393,7 +448,7 @@ var TC = (function () {
   /* ---------- data access ---------- */
   function emps(A) { return A.rows(TABLES.EMP); }
   function isActive(e) { return String(e.active).toUpperCase() !== 'FALSE'; }
-  function pubEmp(e) { return { id: e.id, code: e.code, name: e.name, gender: e.gender, position: e.position, photo: e.photo, email: e.email, phone: e.phone, shiftStart: e.shiftStart || '', shiftEnd: e.shiftEnd || '', workdays: e.workdays || '', satStart: e.satStart || '', satEnd: e.satEnd || '', dayTimes: e.dayTimes || '', device: e.deviceId ? (e.deviceAt || 'ลงทะเบียนแล้ว') : '' }; }
+  function pubEmp(e) { return { id: e.id, code: e.code, name: e.name, gender: e.gender, position: e.position, photo: e.photo, email: e.email, phone: e.phone, shiftStart: e.shiftStart || '', shiftEnd: e.shiftEnd || '', workdays: e.workdays || '', satStart: e.satStart || '', satEnd: e.satEnd || '', dayTimes: e.dayTimes || '', startDate: e.startDate || '', device: e.deviceId ? (e.deviceAt || 'ลงทะเบียนแล้ว') : '' }; }
   function recObj(r) { return { date: r.date, empId: r.empId, in: r.in, out: r.out, lateMin: num(r.lateMin, 0), inDist: num(r.inDist, null), outDist: num(r.outDist, null), note: r.note || '', inPhoto: r.inPhoto || '', outPhoto: r.outPhoto || '', flag: r.flag || '' }; }
   function leaveObj(l) { return { id: l.id, empId: l.empId, code: l.code, name: l.name, type: l.type, start: l.start, end: l.end, part: l.part || 'full', days: num(l.days, 0), reason: l.reason, status: l.status, createdAt: l.createdAt, decidedAt: l.decidedAt, adminNote: l.adminNote || '' }; }
   function adjObj(a) { return { id: a.id, empId: a.empId, code: a.code, name: a.name, date: a.date, in: a.in, out: a.out, reason: a.reason, status: a.status, createdAt: a.createdAt, decidedAt: a.decidedAt, adminNote: a.adminNote || '' }; }
@@ -485,8 +540,14 @@ var TC = (function () {
         c.A.rows(TABLES.ADJ).filter(function (a) { return a.empId === e.id && a.status === 'pending'; }).length
     };
   }
+  /** วันเริ่มใช้ระบบ: ตั้งเองในหน้าตั้งค่า หรือถ้าไม่ได้ตั้ง ใช้วันแรกที่มีคนลงเวลา · ก่อนวันนี้ไม่นับขาด */
+  function goLive(c) {
+    if (c.S.startDate) return c.S.startDate;
+    var first = ''; c.A.rows(TABLES.REC).forEach(function (r) { if (isDate(r.date) && (!first || r.date < first)) first = r.date; });
+    return first || c.now.date;
+  }
   function myMonth(c) {
-    var e = myEmp(c), m = str(c.p.month);
+    var e = myEmp(c), m = str(c.p.month); c.S.goLive = goLive(c);
     if (!isMonth(m)) throw E('เดือนไม่ถูกต้อง');
     var data = monthData(c, m, [e]);
     data.report = monthReport(m, [e], data.records, data.leaves, data.holidays, c.S, c.now.date)[0];
@@ -627,6 +688,7 @@ var TC = (function () {
   }
   function adminMonth(c) {
     var m = str(c.p.month); if (!isMonth(m)) throw E('เดือนไม่ถูกต้อง');
+    c.S.goLive = goLive(c);
     var list = employeesForMonth(c, m), data = monthData(c, m, list);
     data.report = monthReport(m, list, data.records, data.leaves, data.holidays, c.S, c.now.date);
     return data;
@@ -688,12 +750,13 @@ var TC = (function () {
       return o;
     });
   }
-  var EMP_FIELDS = ['code', 'name', 'gender', 'email', 'phone', 'position', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note', 'shiftStart', 'shiftEnd', 'workdays', 'satStart', 'satEnd', 'dayTimes'];
+  var EMP_FIELDS = ['code', 'name', 'gender', 'email', 'phone', 'position', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note', 'shiftStart', 'shiftEnd', 'workdays', 'satStart', 'satEnd', 'dayTimes', 'startDate'];
   function cleanEmp(src) {
     var o = {};
     EMP_FIELDS.forEach(function (k) { if (src[k] !== undefined) o[k] = str(src[k]); });
     if (o.phone !== undefined) o.phone = digits(o.phone);
     if (o.email !== undefined) { o.email = o.email.toLowerCase(); if (o.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(o.email)) throw E('อีเมลไม่ถูกต้อง: ' + o.email); }
+    if (o.startDate !== undefined && o.startDate && !isDate(o.startDate)) throw E('วันเริ่มงานต้องอยู่ในรูปแบบ ปปปป-ดด-วว เช่น 2026-10-08');
     if (o.workdays !== undefined) { var wd = parseDays(o.workdays); o.workdays = wd ? wd.join(',') : ''; }
     if (o.dayTimes !== undefined) {
       var raw = o.dayTimes.split(/[;\n]+/).filter(function (x) { return x.trim(); }), parsed = parseDayTimes(o.dayTimes);
@@ -768,7 +831,8 @@ var TC = (function () {
   }
   function saveSettings(c) {
     var s = c.p.settings || {};
-    PUBLIC_SETTINGS.forEach(function (k) { if (s[k] !== undefined) c.A.setSetting(k, Array.isArray(s[k]) ? s[k].join(',') : str(s[k])); });
+    if (s.startDate && !isDate(str(s.startDate))) throw E('วันเริ่มใช้ระบบไม่ถูกต้อง');
+    PUBLIC_SETTINGS.concat(ADMIN_SETTINGS).forEach(function (k) { if (s[k] !== undefined) c.A.setSetting(k, Array.isArray(s[k]) ? s[k].join(',') : str(s[k])); });
     return pubSettings(settings(c.A));
   }
   function changeAdmin(c) {
@@ -800,6 +864,7 @@ var TC = (function () {
   }
   function buildMonth(c) {
     var m = str(c.p.month); if (!isMonth(m)) throw E('เดือนไม่ถูกต้อง');
+    c.S.goLive = goLive(c);
     var list = employeesForMonth(c, m), d = monthData(c, m, list);
     var rep = monthReport(m, list, d.records, d.leaves, d.holidays, c.S, c.now.date);
     return { url: c.A.buildMonthSheet ? c.A.buildMonthSheet(m, rep, c.S, c.now) : '' };
@@ -821,15 +886,16 @@ var TC = (function () {
         if (l.empId !== e.id || (l.status !== 'approved' && l.status !== 'pending')) return;
         range(l.start, l.end).forEach(function (d) { if (d.indexOf(m) === 0 && (!lby[d] || l.status === 'approved')) lby[d] = l; });
       });
-      var wdays = daysOf(e, S);
+      var wdays = daysOf(e, S), from = S.goLive || '';
+      if (isDate(e.startDate) && e.startDate > from) from = e.startDate;
       var t = { devFlags: 0, workdays: 0, present: 0, lateDays: 0, lateMin: 0, earlyDays: 0, earlyMin: 0, absent: 0, noOut: 0, minutes: 0, leaveDays: 0, leaveToDate: 0, leave: {} };
       Object.keys(LEAVE_TYPES).forEach(function (k) { t.leave[k] = 0; });
       var list = days.map(function (d) {
         var work = wdays.indexOf(dow(d)) >= 0 && !hm[d];
-        var r = rby[d] || null, l = lby[d] || null, la = l && l.status === 'approved' ? l : null, late = 0, st;
+        var r = rby[d] || null, l = lby[d] || null, la = l && l.status === 'approved' ? l : null, late = 0, st, pre = !!from && d < from && !r;
         var sh = shiftOf(e, S, d), early = 0, flags = [];
         if (la && work) { var amt = la.part === 'full' ? 1 : 0.5; t.leave[la.type] = (t.leave[la.type] || 0) + amt; t.leaveDays += amt; if (d <= today) t.leaveToDate += amt; }
-        if (work && d <= today) t.workdays++;
+        if (work && d <= today && !pre) t.workdays++;
         if (r) {
           t.present++;
           late = la && la.part === 'am' ? 0 : num(r.lateMin, 0);
@@ -842,6 +908,7 @@ var TC = (function () {
           if (r.flag) { t.devFlags++; flags.push('device'); }
           st = late > 0 ? 'late' : 'ok';
         } else if (!work) st = hm[d] ? 'holiday' : 'off';
+        else if (pre && !la) st = 'pre';
         else if (la && la.part === 'full') st = 'leave';
         else if (d > today) st = 'future';
         else if (d === today) st = 'pending';
@@ -894,6 +961,7 @@ var TC = (function () {
           T.lv[k] += amt; c[14 + ['personal', 'sick', 'vacation', 'other'].indexOf(k)] = amt;
           notes.push(LEAVE_TYPES[la.type] + (la.part !== 'full' ? ' (' + PART[la.part] + ')' : '') + (la.reason ? ': ' + la.reason : ''));
         } else if (x.leave && x.leave.status === 'pending') notes.push(LEAVE_TYPES[x.leave.type] + ' รออนุมัติ');
+        if (x.st === 'pre') notes.push('ยังไม่เริ่มใช้ระบบ');
         if (rec && rec.note) notes.push(rec.note);
         if (rec && rec.flag) notes.push('ตรวจสอบมือถือ: ' + rec.flag);
         c[18] = notes.join(' · ');
@@ -913,7 +981,7 @@ var TC = (function () {
     adminToday: adminToday, adminMonth: adminMonth, requests: requests, decide: decide, employees: employees, saveEmp: saveEmp,
     importEmps: importEmps, delEmp: delEmp, restoreEmp: restoreEmp, resetLogin: resetLogin, resetDevice: resetDevice, selfie: selfie, holidays: listHolidays, saveHoliday: saveHoliday,
     delHoliday: delHoliday, saveSettings: saveSettings, changeAdmin: changeAdmin, qr: qr, rotateQr: rotateQr, editRecord: editRecord, buildMonth: buildMonth,
-    settings: function (c) { return { settings: pubSettings(c.S), adminUser: c.S.adminUser, mustChange: !c.S.adminHash }; }
+    settings: function (c) { return { settings: pubSettings(c.S), admin: { driveFolder: str(c.A.getSettings().driveFolder) }, goLive: goLive(c), adminUser: c.S.adminUser, mustChange: !c.S.adminHash }; }
   };
   function run(A, p) {
     var c = { A: A, p: p, now: A.now() };
@@ -940,7 +1008,7 @@ var TC = (function () {
   }
 
   return {
-    handle: handle, monthReport: monthReport, exportTable: exportTable, ADJ_WINDOW: ADJ_WINDOW, TABLES: TABLES, LEAVE_TYPES: LEAVE_TYPES, PART: PART, STATUS: STATUS,
+    handle: handle, WRITES: WRITES, monthReport: monthReport, exportTable: exportTable, ADJ_WINDOW: ADJ_WINDOW, TABLES: TABLES, LEAVE_TYPES: LEAVE_TYPES, PART: PART, STATUS: STATUS,
     DEFAULTS: DEFAULTS, util: { monthDays: monthDays, dow: dow, addDays: addDays, range: range, toMin: toMin, haversine: haversine, fmtDist: fmtDist, lateOf: lateOf, shiftOf: shiftOf, daysOf: daysOf, parseDays: parseDays, daysText: daysText, scheduleText: scheduleText, parseDayTimes: parseDayTimes, dayTimesText: dayTimesText, customSchedule: customSchedule, isDate: isDate, isTime: isTime }
   };
 })();
