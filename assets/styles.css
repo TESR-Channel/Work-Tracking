@@ -306,3 +306,15 @@ td.num,td.mono,td.r{white-space:nowrap}
 .report-x th{position:sticky;top:0;z-index:1;background:var(--crimson);color:#fff;text-align:center;white-space:nowrap;border:1px solid rgba(255,255,255,.25)}
 .report-x thead tr:nth-child(2) th{top:31px}
 .report-x td{padding:5px 8px;white-space:nowrap;border-bottom:1px solid var(--line)}
+/* ผลการสแกน: ทับจอกล้องให้เห็นชัดว่าสำเร็จหรือไม่ */
+.vf-done{position:absolute;inset:0;z-index:3;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:16px;color:#fff;animation:vfpop .25s ease-out}
+.vf-done .ic{width:84px;height:84px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.18)}
+.vf-done .ic svg{width:52px;height:52px}
+.vf-done b{font-size:24px;line-height:1.25}
+.vf-done span{font-size:14px;opacity:.92}
+.vf-done.ok{background:#1f8a5b}
+.vf-done.warn{background:#c77a12}
+.vf-done.bad{background:#c0392b}
+.vf-done.wait{background:#2b2522}
+@keyframes vfpop{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.vf-done{animation:none}}

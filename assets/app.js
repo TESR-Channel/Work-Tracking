@@ -126,6 +126,39 @@ var APP = (function () {
     } catch (e) {}
   }
 
+  /* เสียงแจ้งผล (WebAudio ไม่ต้องโหลดไฟล์) · iOS ต้องเรียก unlock() ระหว่างที่ผู้ใช้แตะหน้าจอ */
+  var sound = (function () {
+    var ctx = null;
+    function unlock() {
+      try {
+        var AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+        if (!ctx) ctx = new AC();
+        if (ctx.state === 'suspended') ctx.resume();
+        var b = ctx.createBuffer(1, 1, 22050), s = ctx.createBufferSource(); s.buffer = b; s.connect(ctx.destination); s.start(0);
+      } catch (e) {}
+    }
+    function tones(list, type) {
+      try {
+        if (!ctx) unlock(); if (!ctx) return;
+        var t = ctx.currentTime + 0.02;
+        list.forEach(function (n) {
+          var o = ctx.createOscillator(), g = ctx.createGain();
+          o.type = type || 'sine'; o.frequency.value = n[0];
+          g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.5, t + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t + n[1]);
+          o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + n[1] + 0.02); t += n[1] * 0.85;
+        });
+      } catch (e) {}
+    }
+    function buzz(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) {} }
+    return {
+      unlock: unlock,
+      scan: function () { tones([[1320, 0.12]], 'square'); buzz(60); },
+      ok: function () { tones([[880, 0.14], [1175, 0.14], [1568, 0.32]]); buzz([80, 60, 120]); },
+      warn: function () { tones([[880, 0.16], [660, 0.3]], 'triangle'); buzz([120, 80, 120]); },
+      bad: function () { tones([[300, 0.22], [220, 0.4]], 'sawtooth'); buzz([250, 100, 250]); }
+    };
+  })();
+
   var ICON = {
     home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>',
     cal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
@@ -144,6 +177,6 @@ var APP = (function () {
     pad: pad, ymd: ymd, hm: hm, esc: esc, thDate: thDate, thRange: thRange, thMonth: thMonth, addMonth: addMonth,
     fmtLate: fmtLate, fmtDays: fmtDays, avatar: avatar, person: person, pill: pill, stPill: stPill, reqPill: reqPill, leaveLabel: leaveLabel,
     store: store, toast: toast, makeApi: makeApi, calendar: calendar, readPhoto: readPhoto, modal: modal, closeModal: closeModal,
-    csv: csv, parseCsv: parseCsv, download: download
+    csv: csv, parseCsv: parseCsv, download: download, sound: sound
   };
 })();
