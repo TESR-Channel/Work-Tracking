@@ -1,348 +1,742 @@
 /**
  * TESR Time Clock — Google Apps Script backend
- * ฐานข้อมูล = Google Sheet นี้
- *   Employees : รายชื่อพนักงาน
- *   Records   : บันทึกเข้า–ออกรายวัน (1 แถว = 1 คน 1 วัน)
- *   Settings  : ตั้งค่า (พิกัดออฟฟิศ รัศมี เวลาเข้างาน PIN แอดมิน)
- *   Holidays  : วันหยุดบริษัท (ไม่นับเป็นวันขาด)
- *   สรุป yyyy-MM : ชีตสรุปรายเดือน (สร้างอัตโนมัติทุกคืน)
+ * --------------------------------------------------------------
+ * ไฟล์นี้สร้างอัตโนมัติจาก src/sheets-adapter.gs + assets/core.js
+ * วางทั้งไฟล์ลงใน Apps Script ของ Google Sheet แล้วรัน setup() 1 ครั้ง
  *
- * ติดตั้ง: รันฟังก์ชัน setup() 1 ครั้ง แล้ว Deploy เป็น Web app
+ * ชีตที่ใช้
+ *   Employees    รายชื่อพนักงาน + บัญชีเข้าระบบ (รหัสผ่านเก็บแบบ hash เท่านั้น) + สิทธิ์ลาต่อปี
+ *   Records      เวลาเข้า–ออกรายวัน (1 แถว = 1 คน 1 วัน)
+ *   Leaves       ใบลา + ผลอนุมัติ (เก็บเป็นหลักฐาน)
+ *   Adjustments  คำขอแก้เวลา + ผลอนุมัติ
+ *   Holidays     วันหยุดบริษัท
+ *   Settings     ตั้งค่าระบบ
+ *   สรุป yyyy-MM สรุปรายเดือนสำหรับทำเงินเดือน (สร้างใหม่ทุกคืน)
  */
 
 const TZ = 'Asia/Bangkok';
-const S_EMP = 'Employees', S_REC = 'Records', S_SET = 'Settings', S_HOL = 'Holidays';
-const EMP_H = ['id', 'code', 'name', 'position', 'photo', 'active'];
-const REC_H = ['date', 'empId', 'code', 'name', 'in', 'out', 'lateMin', 'inDist', 'outDist', 'updatedAt'];
-const DEFAULTS = {
-  office: 'TESR HQ · นนทบุรี', lat: 13.8621, lng: 100.5144, radius: 1000,
-  start: '08:30', end: '17:30', grace: 0, workdays: '1,2,3,4,5', appUrl: '', adminPin: '1234'
-};
 const TH_MF = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
 const TH_D = ['อา.','จ.','อ.','พ.','พฤ.','ศ.','ส.'];
+const ST_TH = { ok: 'มา', late: 'สาย', absent: 'ขาด', leave: 'ลา', pending: 'ยังไม่เข้างาน', holiday: 'วันหยุด', off: 'วันหยุดประจำสัปดาห์', future: '' };
 
-/* ===================== ติดตั้ง ===================== */
+/* ===================== Web API ===================== */
+function doGet(e) { return json_({ ok: true, data: 'TESR Time Clock API' }); }
+function doPost(e) {
+  let p = {};
+  try { p = JSON.parse(e.postData.contents); } catch (err) {}
+  return json_(TC.handle(SheetsAdapter_(), p));
+}
+function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
+
+/* ===================== ติดตั้ง / เมนู / ตั้งเวลา ===================== */
 function setup() {
   const ss = SpreadsheetApp.getActive();
   ss.setSpreadsheetTimeZone(TZ);
-  [[S_EMP, EMP_H], [S_REC, REC_H], [S_SET, ['key', 'value']], [S_HOL, ['date', 'name']]].forEach(([n, h]) => {
-    const s = ensure_(n, h);
-    s.getRange(1, 1, s.getMaxRows(), s.getMaxColumns()).setNumberFormat('@');
-  });
-  const set = sheet_(S_SET), cur = readSettings_();
-  Object.keys(DEFAULTS).forEach(k => { if (!(k in cur)) set.appendRow([k, String(DEFAULTS[k])]); });
+  Object.keys(TC.TABLES).forEach(k => ensureTable_(TC.TABLES[k]));
+  const set = ensureSettings_();
+  const cur = readSettingsRaw_();
+  Object.keys(TC.DEFAULTS).forEach(k => { if (!(k in cur)) set.appendRow([k, String(TC.DEFAULTS[k])]); });
+  set.getRange('A:B').setNumberFormat('@');
   const props = PropertiesService.getScriptProperties();
-  if (!props.getProperty('SECRET')) props.setProperty('SECRET', Utilities.getUuid());
+  if (!props.getProperty('SECRET')) props.setProperty('SECRET', Utilities.getUuid() + Utilities.getUuid());
   installTriggers();
-  SpreadsheetApp.getActive().toast('ติดตั้งเรียบร้อย · อย่าลืมเปลี่ยน adminPin ในชีต Settings', 'TESR Time Clock', 8);
+  ss.toast('ติดตั้งเรียบร้อย · เข้าหน้าแอดมินด้วย admin / tesr1234 แล้วเปลี่ยนรหัสผ่านทันที', 'TESR Time Clock', 10);
 }
-
 function installTriggers() {
   ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'nightly').forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('nightly').timeBased().everyDays(1).atHour(23).nearMinute(30).create();
 }
-
-/** ทุกคืน: อัปเดตชีตสรุปเดือนนี้ และวันที่ 1 ปิดยอดเดือนก่อน */
+/** ทุกคืน 23:30 อัปเดตชีตสรุปเดือนนี้ · วันที่ 1 ปิดยอดเดือนก่อนด้วย */
 function nightly() {
-  const now = new Date();
-  buildMonth_(fmt_(now, 'yyyy-MM'));
-  if (Number(fmt_(now, 'd')) === 1) buildMonth_(fmt_(new Date(now.getFullYear(), now.getMonth() - 1, 1), 'yyyy-MM'));
+  const n = new Date();
+  buildSheet_(Utilities.formatDate(n, TZ, 'yyyy-MM'));
+  if (Utilities.formatDate(n, TZ, 'd') === '1') buildSheet_(Utilities.formatDate(new Date(n.getFullYear(), n.getMonth() - 1, 1), TZ, 'yyyy-MM'));
 }
-
+function buildSheet_(m) { return TC_internalBuild_(SheetsAdapter_(), m); }
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('TESR Time Clock')
     .addItem('อัปเดตสรุปเดือนนี้', 'menuThisMonth')
     .addItem('อัปเดตสรุปเดือนก่อน', 'menuLastMonth')
     .addSeparator()
     .addItem('ติดตั้ง / ซ่อมระบบ (setup)', 'setup')
+    .addItem('รีเซ็ตรหัสผ่านแอดมินเป็นค่าเริ่มต้น', 'resetAdminPassword')
     .addToUi();
 }
-function menuThisMonth() { buildMonth_(fmt_(new Date(), 'yyyy-MM')); }
-function menuLastMonth() { const n = new Date(); buildMonth_(fmt_(new Date(n.getFullYear(), n.getMonth() - 1, 1), 'yyyy-MM')); }
-
-/* ===================== Web API ===================== */
-function doGet(e) { return out_(route_((e && e.parameter) || {})); }
-function doPost(e) {
-  let p = {};
-  try { p = JSON.parse(e.postData.contents); } catch (err) {}
-  return out_(route_(p));
+function menuThisMonth() { buildSheet_(Utilities.formatDate(new Date(), TZ, 'yyyy-MM')); }
+function menuLastMonth() { const n = new Date(); buildSheet_(Utilities.formatDate(new Date(n.getFullYear(), n.getMonth() - 1, 1), TZ, 'yyyy-MM')); }
+/** กรณีลืมรหัสแอดมิน: รันจากเมนูในชีต (ต้องเป็นเจ้าของชีตเท่านั้น) แล้วเข้าด้วย admin / tesr1234 */
+function resetAdminPassword() {
+  const A = SheetsAdapter_();
+  A.setSetting('adminUser', 'admin'); A.setSetting('adminHash', '');
+  SpreadsheetApp.getActive().toast('รีเซ็ตแล้ว: admin / tesr1234 · เข้าระบบแล้วเปลี่ยนรหัสทันที', 'TESR Time Clock', 10);
 }
-function out_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
-
-function route_(p) {
-  try {
-    const pub = { init: init_, my: my_, punch: punch_, photo: photo_ };
-    if (pub[p.action]) return { ok: true, data: pub[p.action](p) };
-    const adm = {
-      login: () => true, today: today_, month: month_, saveEmp: saveEmp_, delEmp: delEmp_,
-      saveSettings: saveSettings_, qr: qr_, buildMonth: q => ({ url: buildMonth_(q.month) })
-    };
-    if (adm[p.action]) {
-      if (String(p.pin || '') !== String(readSettings_().adminPin)) throw new Error('รหัส PIN แอดมินไม่ถูกต้อง');
-      return { ok: true, data: adm[p.action](p) };
-    }
-    throw new Error('ไม่รู้จักคำสั่ง: ' + p.action);
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+/** ทริกเกอร์ทำงานในฐานะเจ้าของชีต จึงออก token แอดมินอายุ 10 นาทีภายในเพื่อเรียก buildMonth ผ่าน router ปกติ */
+function TC_internalBuild_(A, m) {
+  const now = A.now();
+  const res = TC.handle(A, { action: 'buildMonth', month: m, token: internalAdminToken_(A, now) });
+  if (!res.ok) throw new Error(res.error);
+  return res.data.url;
+}
+function internalAdminToken_(A, now) {
+  const raw = A.getSettings();
+  const v = A.hmac('v|' + (raw.adminHash || '')).slice(0, 8);
+  const p = ['admin', 'admin', v, now.ms + 600000].join('.');
+  return p + '.' + A.hmac(p);
 }
 
-/* ---------- public ---------- */
-function init_() {
-  return { settings: publicSettings_(), employees: employees_().map(pubEmp_), today: todayStr_(), now: fmt_(new Date(), 'HH:mm') };
-}
-
-function my_(p) {
-  return records_().filter(r => r.empId === p.empId && r.date.indexOf(p.month) === 0);
-}
-
-function punch_(p) {
-  const lock = LockService.getScriptLock();
-  lock.waitLock(15000);
-  try {
-    const s = readSettings_();
-    const emp = employees_().find(e => e.id === p.empId);
-    if (!emp) throw new Error('ไม่พบพนักงานคนนี้ในระบบ');
-    const date = todayStr_(), time = fmt_(new Date(), 'HH:mm');
-    if (String(p.token || '') !== tokenFor_(date)) throw new Error('QR Code ไม่ถูกต้องหรือหมดอายุ (ใช้ได้เฉพาะ QR ของวันนี้)');
-    const lat = Number(p.lat), lng = Number(p.lng);
-    if (!isFinite(lat) || !isFinite(lng) || (!lat && !lng)) throw new Error('ไม่ได้รับพิกัด GPS จากมือถือ');
-    const dist = Math.round(haversine_(lat, lng, s.lat, s.lng));
-    if (dist > s.radius) throw new Error('อยู่ห่างออฟฟิศ ' + fmtDist_(dist) + ' เกินรัศมีที่อนุญาต ' + fmtDist_(s.radius));
-
-    const sh = sheet_(S_REC), rows = sh.getDataRange().getValues();
-    const stamp = new Date().toISOString();
-    for (let i = 1; i < rows.length; i++) {
-      if (normDate_(rows[i][0]) === date && String(rows[i][1]) === emp.id) {
-        if (normTime_(rows[i][5])) throw new Error('วันนี้ลงเวลาเข้า–ออกครบแล้ว');
-        sh.getRange(i + 1, 6).setNumberFormat('@').setValue(time);
-        sh.getRange(i + 1, 9, 1, 2).setNumberFormat('@').setValues([[String(dist), stamp]]);
-        const r = recObj_(rows[i]); r.out = time; r.outDist = dist;
-        return { kind: 'out', rec: r };
-      }
-    }
-    const late = lateMin_(time, s);
-    const row = sh.getLastRow() + 1;
-    sh.getRange(row, 1, 1, REC_H.length).setNumberFormat('@')
-      .setValues([[date, emp.id, emp.code, emp.name, time, '', String(late), String(dist), '', stamp]]);
-    return { kind: 'in', rec: { date: date, empId: emp.id, in: time, out: '', late: late, inDist: dist, outDist: null } };
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-function photo_(p) {
-  const emp = employees_().find(e => e.id === p.empId);
-  if (!emp) throw new Error('ไม่พบพนักงานคนนี้ในระบบ');
-  const m = String(p.data || '').match(/^data:(image\/\w+);base64,(.+)$/);
-  if (!m) throw new Error('ไฟล์รูปไม่ถูกต้อง');
-  const blob = Utilities.newBlob(Utilities.base64Decode(m[2]), m[1], emp.code + '.jpg');
-  const folder = photoFolder_();
-  const file = folder.createFile(blob);
-  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  const url = 'https://lh3.googleusercontent.com/d/' + file.getId();
-  setEmpField_(emp.id, 'photo', url);
-  return { url: url };
-}
-
-/* ---------- admin ---------- */
-function today_() {
-  const d = todayStr_();
-  return { employees: employees_().map(pubEmp_), records: records_().filter(r => r.date === d), today: d };
-}
-
-function month_(p) {
-  const m = p.month;
-  const recs = records_().filter(r => r.date.indexOf(m) === 0);
-  return { employees: employeesForMonth_(recs).map(pubEmp_), records: recs, workdays: workdays_(m), holidays: holidays_(m), today: todayStr_() };
-}
-
-function saveEmp_(p) {
-  const e = p.emp || {};
-  if (!e.name || !e.code) throw new Error('ต้องกรอกชื่อและรหัสพนักงาน');
-  const sh = sheet_(S_EMP), rows = sh.getDataRange().getValues();
-  if (e.id) {
-    for (let i = 1; i < rows.length; i++) if (String(rows[i][0]) === e.id) {
-      sh.getRange(i + 1, 2, 1, 3).setNumberFormat('@').setValues([[e.code, e.name, e.pos || '']]);
-      return { id: e.id };
-    }
-  }
-  if (rows.slice(1).some(r => String(r[1]) === e.code && String(r[5]) !== 'FALSE')) throw new Error('รหัสพนักงาน ' + e.code + ' มีอยู่แล้ว');
-  const id = 'e' + Utilities.getUuid().slice(0, 8);
-  sh.getRange(sh.getLastRow() + 1, 1, 1, EMP_H.length).setNumberFormat('@').setValues([[id, e.code, e.name, e.pos || '', '', 'TRUE']]);
-  return { id: id };
-}
-
-/** ลบแบบเก็บประวัติไว้: ซ่อนจากรายชื่อ แต่ข้อมูลเดือนเก่ายังอยู่ */
-function delEmp_(p) { setEmpField_(p.id, 'active', 'FALSE'); return true; }
-
-function saveSettings_(p) {
-  const allow = ['office', 'lat', 'lng', 'radius', 'start', 'end', 'grace', 'workdays', 'appUrl', 'adminPin'];
-  const sh = sheet_(S_SET), rows = sh.getDataRange().getValues();
-  Object.keys(p.settings || {}).forEach(k => {
-    if (allow.indexOf(k) < 0) return;
-    const v = String(p.settings[k]);
-    if (k === 'adminPin' && v.length < 4) return;
-    const i = rows.findIndex(r => r[0] === k);
-    if (i > 0) sh.getRange(i + 1, 2).setNumberFormat('@').setValue(v);
-    else sh.appendRow([k, v]);
-  });
-  return publicSettings_();
-}
-
-function qr_() {
-  const d = todayStr_(), t = tokenFor_(d), s = readSettings_();
-  const payload = s.appUrl ? s.appUrl.replace(/[?#].*$/, '') + '?t=' + t : 'TESR-ATTEND|' + d + '|' + t;
-  return { date: d, token: t, payload: payload };
-}
-
-/* ===================== ชีตสรุปรายเดือน ===================== */
-function buildMonth_(m) {
-  const ss = SpreadsheetApp.getActive(), s = readSettings_();
-  const recs = records_().filter(r => r.date.indexOf(m) === 0);
-  const emps = employeesForMonth_(recs);
-  const work = workdays_(m), today = todayStr_();
-  const [y, mo] = m.split('-').map(Number);
-
-  const summary = [], detail = [];
-  emps.forEach(e => {
-    const mine = recs.filter(r => r.empId === e.id);
-    const by = {}; mine.forEach(r => by[r.date] = r);
-    const dates = Array.from(new Set(work.concat(mine.map(r => r.date)))).sort();
-    let present = 0, absent = 0, lateDays = 0, lateSum = 0, noOut = 0, mins = 0;
-    dates.forEach(d => {
-      const r = by[d], dow = TH_D[dateObj_(d).getDay()];
-      let st;
-      if (r) {
-        present++; if (r.late > 0) { lateDays++; lateSum += r.late; }
-        if (r.out) mins += toMin_(r.out) - toMin_(r.in); else if (d < today) noOut++;
-        st = r.late > 0 ? 'สาย' : 'มา';
-        if (work.indexOf(d) < 0) st += ' (วันหยุด)';
-      } else if (d === today) st = 'ยังไม่เข้างาน';
-      else { absent++; st = 'ขาด'; }
-      detail.push([d, dow, e.code, e.name, st, r ? r.in : '', r ? (r.out || (d < today ? 'ไม่ได้เช็คเอาท์' : '')) : '', r ? r.late : '']);
-    });
-    summary.push([e.code, e.name, e.pos, work.filter(d => d < today || by[d]).length, present, absent, lateDays, lateSum, noOut, Math.round(mins / 6) / 10]);
-  });
-
-  const name = 'สรุป ' + m;
-  let sh = ss.getSheetByName(name);
-  if (sh) sh.clear(); else sh = ss.insertSheet(name);
-  sh.getRange(1, 1).setValue('สรุปการลงเวลา เดือน' + TH_MF[mo - 1] + ' ' + (y + 543)).setFontSize(14).setFontWeight('bold');
-  sh.getRange(2, 1).setValue('เวลาเข้างาน ' + s.start + (s.grace ? ' (ผ่อนผัน ' + s.grace + ' นาที)' : '') + ' · อัปเดตล่าสุด ' + fmt_(new Date(), 'dd/MM/yyyy HH:mm')).setFontColor('#6b625a');
-
-  const sumH = ['รหัส', 'ชื่อ', 'ตำแหน่ง', 'วันทำงาน', 'มาทำงาน (วัน)', 'ขาด (วัน)', 'มาสาย (วัน)', 'สายรวม (นาที)', 'ลืมเช็คเอาท์', 'ชั่วโมงทำงาน'];
-  head_(sh.getRange(4, 1, 1, sumH.length).setValues([sumH]));
-  if (summary.length) {
-    sh.getRange(5, 1, summary.length, 1).setNumberFormat('@');
-    sh.getRange(5, 1, summary.length, sumH.length).setValues(summary);
-  }
-
-  const d0 = 5 + summary.length + 2;
-  sh.getRange(d0 - 1, 1).setValue('รายละเอียดรายวัน').setFontWeight('bold');
-  const detH = ['วันที่', 'วัน', 'รหัส', 'ชื่อ', 'สถานะ', 'เข้างาน', 'ออกงาน', 'สาย (นาที)'];
-  head_(sh.getRange(d0, 1, 1, detH.length).setValues([detH]));
-  if (detail.length) {
-    [1, 3, 6, 7].forEach(c => sh.getRange(d0 + 1, c, detail.length, 1).setNumberFormat('@'));
-    sh.getRange(d0 + 1, 1, detail.length, detH.length).setValues(detail);
-    const bg = detail.map(r => {
-      const c = r[4].indexOf('ขาด') === 0 ? '#fbe1df' : r[4].indexOf('สาย') === 0 ? '#fbead6' : null;
-      return Array(detH.length).fill(c);
-    });
-    sh.getRange(d0 + 1, 1, detail.length, detH.length).setBackgrounds(bg);
-  }
-  sh.setFrozenRows(0);
-  sh.setColumnWidth(1, 95); sh.setColumnWidth(2, 170); sh.setColumnWidth(3, 150);
-  for (let c = 4; c <= 10; c++) sh.setColumnWidth(c, 105);
-  return ss.getUrl() + '#gid=' + sh.getSheetId();
-}
-
-function head_(rg) { rg.setFontWeight('bold').setBackground('#8B0000').setFontColor('#ffffff'); }
-
-/* ===================== helpers ===================== */
-function sheet_(n) { return SpreadsheetApp.getActive().getSheetByName(n) || ensure_(n, n === S_EMP ? EMP_H : n === S_REC ? REC_H : n === S_HOL ? ['date', 'name'] : ['key', 'value']); }
-function ensure_(n, h) {
+/* ===================== Sheets adapter ===================== */
+function SheetsAdapter_() {
   const ss = SpreadsheetApp.getActive();
-  let s = ss.getSheetByName(n);
-  if (!s) { s = ss.insertSheet(n); s.getRange(1, 1, 1, h.length).setValues([h]).setFontWeight('bold'); s.setFrozenRows(1); }
-  return s;
-}
-function fmt_(d, f) { return Utilities.formatDate(d, TZ, f); }
-function todayStr_() { return fmt_(new Date(), 'yyyy-MM-dd'); }
-function dateObj_(s) { const p = s.split('-').map(Number); return new Date(p[0], p[1] - 1, p[2]); }
-function normDate_(v) { return v instanceof Date ? fmt_(v, 'yyyy-MM-dd') : String(v || '').trim(); }
-function normTime_(v) { if (v instanceof Date) return fmt_(v, 'HH:mm'); const s = String(v || '').trim(); return /^\d:\d\d$/.test(s) ? '0' + s : s; }
-function toMin_(t) { const p = String(t).split(':').map(Number); return p[0] * 60 + p[1]; }
-function lateMin_(t, s) { return Math.max(0, toMin_(t) - toMin_(s.start) - (Number(s.grace) || 0)); }
-function fmtDist_(m) { return m >= 1000 ? (m / 1000).toFixed(2) + ' กม.' : m + ' ม.'; }
-function haversine_(a, b, c, d) {
-  const R = 6371000, t = x => x * Math.PI / 180, dl = t(c - a), dg = t(d - b);
-  const h = Math.sin(dl / 2) ** 2 + Math.cos(t(a)) * Math.cos(t(c)) * Math.sin(dg / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(h));
-}
-function tokenFor_(date) {
-  const secret = PropertiesService.getScriptProperties().getProperty('SECRET') || 'tesr';
-  const sig = Utilities.computeHmacSha256Signature(date, secret);
-  return Utilities.base64EncodeWebSafe(sig).replace(/[^A-Za-z0-9]/g, '').slice(0, 12);
-}
-
-function readSettings_() {
-  const s = SpreadsheetApp.getActive().getSheetByName(S_SET);
-  const o = {};
-  if (s) s.getDataRange().getValues().slice(1).forEach(r => { if (r[0]) o[r[0]] = r[1] instanceof Date ? fmt_(r[1], 'HH:mm') : String(r[1]); });
-  ['lat', 'lng', 'radius', 'grace'].forEach(k => { if (k in o) o[k] = Number(o[k]); });
-  ['start', 'end'].forEach(k => { if (k in o) o[k] = normTime_(o[k]); });
-  return o;
-}
-function publicSettings_() {
-  const s = readSettings_(); delete s.adminPin;
-  s.workdays = String(s.workdays || '1,2,3,4,5').split(',').map(Number);
-  return s;
-}
-function allEmployees_() {
-  return sheet_(S_EMP).getDataRange().getValues().slice(1).filter(r => r[0]).map(r => ({
-    id: String(r[0]), code: String(r[1]), name: String(r[2]), pos: String(r[3] || ''), photo: String(r[4] || ''), active: String(r[5]) !== 'FALSE'
-  }));
-}
-function employees_() { return allEmployees_().filter(e => e.active); }
-function employeesForMonth_(recs) {
-  const ids = {}; recs.forEach(r => ids[r.empId] = 1);
-  return allEmployees_().filter(e => e.active || ids[e.id]);
-}
-function pubEmp_(e) { return { id: e.id, code: e.code, name: e.name, pos: e.pos, photo: e.photo }; }
-function setEmpField_(id, field, val) {
-  const sh = sheet_(S_EMP), rows = sh.getDataRange().getValues(), col = EMP_H.indexOf(field) + 1;
-  for (let i = 1; i < rows.length; i++) if (String(rows[i][0]) === id) { sh.getRange(i + 1, col).setNumberFormat('@').setValue(val); return; }
-  throw new Error('ไม่พบพนักงาน');
-}
-function recObj_(r) {
+  const cache = {};
+  const secret = PropertiesService.getScriptProperties().getProperty('SECRET') || 'tesr-time-clock';
+  const sc = CacheService.getScriptCache();
+  function load(t) {
+    if (cache[t.name]) return cache[t.name];
+    const sh = ensureTable_(t), v = sh.getDataRange().getValues(), head = v[0].map(String);
+    const out = [];
+    for (let i = 1; i < v.length; i++) {
+      const o = { _row: i + 1 }; let any = false;
+      head.forEach((k, j) => { if (!k) return; o[k] = norm_(v[i][j], k); if (o[k] !== '') any = true; });
+      if (any) out.push(o);
+    }
+    cache[t.name] = { sh, head, rows: out };
+    return cache[t.name];
+  }
+  function writeRow(t, row, obj) {
+    const d = load(t);
+    const vals = d.head.map(k => obj[k] === undefined || obj[k] === null ? '' : String(obj[k]));
+    d.sh.getRange(row, 1, 1, d.head.length).setNumberFormat('@').setValues([vals]);
+  }
   return {
-    date: normDate_(r[0]), empId: String(r[1]), in: normTime_(r[4]), out: normTime_(r[5]),
-    late: Number(r[6]) || 0, inDist: r[7] === '' ? null : Number(r[7]), outDist: r[8] === '' ? null : Number(r[8])
+    rows: t => load(t).rows,
+    insert(t, obj) { const d = load(t); const row = d.sh.getLastRow() + 1; writeRow(t, row, obj); const o = Object.assign({ _row: row }, obj); d.rows.push(o); return o; },
+    update(t, ref, patch) { const d = load(t); Object.assign(ref, patch); writeRow(t, ref._row, ref); },
+    remove(t, ref) { const d = load(t); d.sh.deleteRow(ref._row); delete cache[t.name]; },
+    getSettings: readSettingsRaw_,
+    setSetting(k, v) {
+      const sh = ensureSettings_(), vals = sh.getDataRange().getValues();
+      for (let i = 1; i < vals.length; i++) if (String(vals[i][0]) === k) { sh.getRange(i + 1, 2).setNumberFormat('@').setValue(String(v)); return; }
+      sh.appendRow([k, String(v)]);
+    },
+    now() { const d = new Date(); return { date: Utilities.formatDate(d, TZ, 'yyyy-MM-dd'), time: Utilities.formatDate(d, TZ, 'HH:mm'), iso: Utilities.formatDate(d, TZ, "yyyy-MM-dd'T'HH:mm:ss"), ms: d.getTime() }; },
+    sha256(s) { return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, s, Utilities.Charset.UTF_8).map(b => ((b + 256) % 256).toString(16).padStart(2, '0')).join(''); },
+    hmac(s) { return Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(s, secret)).replace(/[^A-Za-z0-9]/g, '').slice(0, 32); },
+    uuid() { return Utilities.getUuid().replace(/-/g, '').slice(0, 10); },
+    cacheGet: k => sc.get(k),
+    cachePut: (k, v, s) => sc.put(k, v, s),
+    lock(fn) { const l = LockService.getScriptLock(); l.waitLock(20000); try { return fn(); } finally { l.releaseLock(); } },
+    savePhoto(emp, mime, b64) {
+      const folder = photoFolder_();
+      const file = folder.createFile(Utilities.newBlob(Utilities.base64Decode(b64), mime, emp.code + '-' + Date.now() + '.jpg'));
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      return 'https://lh3.googleusercontent.com/d/' + file.getId();
+    },
+    buildMonthSheet: writeMonthSheet_
   };
 }
-function records_() { return sheet_(S_REC).getDataRange().getValues().slice(1).filter(r => r[0]).map(recObj_); }
-function holidays_(m) {
-  return sheet_(S_HOL).getDataRange().getValues().slice(1).map(r => ({ date: normDate_(r[0]), name: String(r[1] || '') }))
-    .filter(h => h.date.indexOf(m) === 0);
-}
-/** วันทำงานของเดือน (ถึงวันนี้) ตามวันทำงานใน Settings และไม่รวมวันหยุดในชีต Holidays */
-function workdays_(m) {
-  const s = publicSettings_(), hol = {}, today = todayStr_();
-  holidays_(m).forEach(h => hol[h.date] = 1);
-  const [y, mo] = m.split('-').map(Number), out = [];
-  for (let d = new Date(y, mo - 1, 1); d.getMonth() === mo - 1; d.setDate(d.getDate() + 1)) {
-    const k = fmt_(d, 'yyyy-MM-dd');
-    if (k > today) break;
-    if (s.workdays.indexOf(d.getDay()) >= 0 && !hol[k]) out.push(k);
+
+function ensureTable_(t) {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(t.name);
+  if (!sh) {
+    sh = ss.insertSheet(t.name);
+    sh.getRange(1, 1, 1, t.cols.length).setValues([t.cols]).setFontWeight('bold').setBackground('#0d0b0a').setFontColor('#C9A84C');
+    sh.setFrozenRows(1);
+    sh.getRange(1, 1, sh.getMaxRows(), t.cols.length).setNumberFormat('@');
+    return sh;
   }
-  return out;
+  // เพิ่มคอลัมน์ที่ขาด (อัปเกรดจากเวอร์ชันเก่า)
+  const lastCol = Math.max(1, sh.getLastColumn());
+  const head = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+  const missing = t.cols.filter(c => head.indexOf(c) < 0);
+  if (missing.length) sh.getRange(1, head.filter(String).length + 1, 1, missing.length).setValues([missing]).setFontWeight('bold');
+  return sh;
+}
+function ensureSettings_() {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName('Settings');
+  if (!sh) { sh = ss.insertSheet('Settings'); sh.getRange(1, 1, 1, 2).setValues([['key', 'value']]).setFontWeight('bold'); sh.setFrozenRows(1); sh.getRange('A:B').setNumberFormat('@'); }
+  return sh;
+}
+function readSettingsRaw_() {
+  const sh = SpreadsheetApp.getActive().getSheetByName('Settings'), o = {};
+  if (!sh) return o;
+  sh.getDataRange().getValues().slice(1).forEach(r => { if (r[0]) o[String(r[0])] = norm_(r[1], String(r[0])); });
+  return o;
+}
+function norm_(v, k) {
+  if (v instanceof Date) return v.getFullYear() < 1901 ? Utilities.formatDate(v, TZ, 'HH:mm') : Utilities.formatDate(v, TZ, 'yyyy-MM-dd');
+  const s = v === null || v === undefined ? '' : String(v).trim();
+  return /^\d:\d\d$/.test(s) ? '0' + s : s;
 }
 function photoFolder_() {
-  const props = PropertiesService.getScriptProperties();
-  const id = props.getProperty('PHOTO_FOLDER');
+  const props = PropertiesService.getScriptProperties(), id = props.getProperty('PHOTO_FOLDER');
   if (id) { try { return DriveApp.getFolderById(id); } catch (e) {} }
   const f = DriveApp.createFolder('TESR Time Clock · Photos');
   props.setProperty('PHOTO_FOLDER', f.getId());
   return f;
 }
+
+/* ===================== ชีตสรุปรายเดือน ===================== */
+function writeMonthSheet_(m, rep, S, now) {
+  const ss = SpreadsheetApp.getActive(), today = now.date, [y, mo] = m.split('-').map(Number);
+  const LT = TC.LEAVE_TYPES, types = Object.keys(LT);
+  const name = 'สรุป ' + m;
+  let sh = ss.getSheetByName(name);
+  if (sh) sh.clear(); else sh = ss.insertSheet(name);
+
+  sh.getRange(1, 1).setValue('สรุปการทำงาน เดือน' + TH_MF[mo - 1] + ' ' + (y + 543) + ' · ' + S.company).setFontSize(14).setFontWeight('bold');
+  sh.getRange(2, 1).setValue('เวลาเข้างาน ' + S.start + (S.grace ? ' (ผ่อนผัน ' + S.grace + ' นาที)' : '') + ' · นับถึงวันที่ ' + today + ' · อัปเดต ' + now.iso.replace('T', ' ')).setFontColor('#6b625a');
+
+  const sumH = ['รหัส', 'ชื่อ', 'ตำแหน่ง', 'วันทำงาน', 'มาทำงาน', 'ขาด (วัน)', 'มาสาย (ครั้ง)', 'สายรวม (นาที)']
+    .concat(types.map(t => LT[t] + ' (วัน)')).concat(['ลืมเช็คเอาท์', 'ชั่วโมงในออฟฟิศ']);
+  const sum = rep.map(r => [r.emp.code, r.emp.name, r.emp.position, r.t.workdays, r.t.present, r.t.absent, r.t.lateDays, r.t.lateMin]
+    .concat(types.map(t => r.t.leave[t] || 0)).concat([r.t.noOut, r.t.hours]));
+  head_(sh.getRange(4, 1, 1, sumH.length).setValues([sumH]));
+  if (sum.length) { sh.getRange(5, 1, sum.length, 1).setNumberFormat('@'); sh.getRange(5, 1, sum.length, sumH.length).setValues(sum); }
+
+  const d0 = 5 + sum.length + 2;
+  sh.getRange(d0 - 1, 1).setValue('รายละเอียดรายวัน').setFontWeight('bold');
+  const detH = ['วันที่', 'วัน', 'รหัส', 'ชื่อ', 'สถานะ', 'เข้างาน', 'ออกงาน', 'สาย (นาที)', 'การลา', 'หมายเหตุ'];
+  head_(sh.getRange(d0, 1, 1, detH.length).setValues([detH]));
+  const det = [], bg = [];
+  rep.forEach(r => r.days.forEach(x => {
+    if (x.date > today) return;
+    if (!x.work && !x.rec && !(x.leave && x.leave.status === 'approved')) return;
+    const lv = x.leave ? LT[x.leave.type] + (x.leave.part !== 'full' ? ' (' + TC.PART[x.leave.part] + ')' : '') + (x.leave.status !== 'approved' ? ' [รออนุมัติ]' : '') : '';
+    const out = x.rec ? (x.rec.out || (x.date < today ? 'ไม่ได้เช็คเอาท์' : '')) : '';
+    det.push([x.date, TH_D[x.dow], r.emp.code, r.emp.name, ST_TH[x.st] || '', x.rec ? x.rec.in : '', out, x.rec ? x.late : '', lv, x.rec && x.rec.note ? x.rec.note : (x.holiday || '')]);
+    const c = x.st === 'absent' ? '#fbe1df' : x.st === 'late' ? '#fbead6' : x.st === 'leave' ? '#e3ecfb' : null;
+    bg.push(Array(detH.length).fill(c));
+  }));
+  if (det.length) {
+    [1, 3, 6, 7].forEach(c => sh.getRange(d0 + 1, c, det.length, 1).setNumberFormat('@'));
+    sh.getRange(d0 + 1, 1, det.length, detH.length).setValues(det).setBackgrounds(bg);
+  }
+  sh.setColumnWidth(1, 95); sh.setColumnWidth(2, 170); sh.setColumnWidth(3, 130);
+  for (let c = 4; c <= sumH.length; c++) sh.setColumnWidth(c, 100);
+  return ss.getUrl() + '#gid=' + sh.getSheetId();
+}
+function head_(rg) { rg.setFontWeight('bold').setBackground('#8B0000').setFontColor('#ffffff').setWrap(true); }
+
+/* ===================== core logic (เหมือนกับ assets/core.js) ===================== */
+
+/* =====================================================================
+ * TESR Time Clock — core logic
+ * ใช้ไฟล์เดียวกันทั้งใน Google Apps Script (หลังบ้านจริง) และโหมดทดลองในเบราว์เซอร์
+ * ทุกคำสั่งผ่าน TC.handle(adapter, params) — adapter คือที่เก็บข้อมูล (Google Sheet หรือ localStorage)
+ * ===================================================================== */
+var TC = (function () {
+  var TABLES = {
+    EMP: { name: 'Employees', cols: ['id', 'code', 'name', 'gender', 'email', 'phone', 'position', 'photo', 'active', 'username', 'passHash', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note'] },
+    REC: { name: 'Records', cols: ['date', 'empId', 'code', 'name', 'in', 'out', 'lateMin', 'inDist', 'outDist', 'note', 'updatedAt'] },
+    LEAVE: { name: 'Leaves', cols: ['id', 'empId', 'code', 'name', 'type', 'start', 'end', 'part', 'days', 'reason', 'status', 'createdAt', 'decidedAt', 'decidedBy', 'adminNote'] },
+    ADJ: { name: 'Adjustments', cols: ['id', 'empId', 'code', 'name', 'date', 'in', 'out', 'reason', 'status', 'createdAt', 'decidedAt', 'decidedBy', 'adminNote'] },
+    HOL: { name: 'Holidays', cols: ['date', 'name'] }
+  };
+  var LEAVE_TYPES = { personal: 'ลากิจ', sick: 'ลาป่วย', vacation: 'ลาพักร้อน', maternity: 'ลาคลอด', unpaid: 'ลาไม่รับค่าจ้าง' };
+  var QUOTA = { personal: 'qPersonal', sick: 'qSick', vacation: 'qVacation', maternity: 'qMaternity' };
+  var PART = { full: 'เต็มวัน', am: 'ครึ่งวันเช้า', pm: 'ครึ่งวันบ่าย' };
+  var STATUS = { pending: 'รออนุมัติ', approved: 'อนุมัติแล้ว', rejected: 'ไม่อนุมัติ', cancelled: 'ยกเลิกแล้ว' };
+  var DEFAULTS = {
+    company: 'TESR Co., Ltd.', office: 'TESR Play Ground', lat: '13.8621', lng: '100.5144', radius: '1000',
+    start: '09:00', end: '18:00', grace: '0', workdays: '1,2,3,4,5', appUrl: '',
+    qPersonal: '7', qSick: '30', qVacation: '6', qMaternity: '0',
+    adminUser: 'admin', adminHash: ''
+  };
+  var DEFAULT_ADMIN_PASSWORD = 'tesr1234';
+  var PUBLIC_SETTINGS = ['company', 'office', 'lat', 'lng', 'radius', 'start', 'end', 'grace', 'workdays', 'appUrl', 'qPersonal', 'qSick', 'qVacation', 'qMaternity'];
+  var WRITES = {
+    login: 1, register: 1, punch: 1, photo: 1, changePassword: 1, leaveCreate: 1, leaveCancel: 1, adjCreate: 1,
+    decide: 1, saveEmp: 1, delEmp: 1, resetLogin: 1, importEmps: 1, saveHoliday: 1, delHoliday: 1,
+    saveSettings: 1, changeAdmin: 1, editRecord: 1, buildMonth: 1
+  };
+
+  /* ---------- small helpers (pure) ---------- */
+  function E(msg, code) { var e = new Error(msg); e.code = code || ''; return e; }
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function toMin(t) { if (!t) return 0; var p = String(t).split(':'); return (+p[0]) * 60 + (+p[1]); }
+  function num(v, d) { if (v === '' || v === null || v === undefined) return d; var n = Number(v); return isFinite(n) ? n : d; }
+  function str(v) { return v === null || v === undefined ? '' : String(v).trim(); }
+  function digits(v) { return str(v).replace(/\D/g, ''); }
+  function parse(s) { var p = s.split('-'); return new Date(Date.UTC(+p[0], +p[1] - 1, +p[2])); }
+  function ymd(d) { return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()); }
+  function dow(s) { return parse(s).getUTCDay(); }
+  function addDays(s, n) { var d = parse(s); d.setUTCDate(d.getUTCDate() + n); return ymd(d); }
+  function range(a, b) { var out = []; if (!isDate(a) || !isDate(b)) return out; for (var d = a; d <= b && out.length < 400; d = addDays(d, 1)) out.push(d); return out; }
+  function monthDays(m) { var p = m.split('-'); var n = new Date(Date.UTC(+p[0], +p[1], 0)).getUTCDate(); var out = []; for (var i = 1; i <= n; i++) out.push(m + '-' + pad(i)); return out; }
+  function isDate(s) { return /^\d{4}-\d{2}-\d{2}$/.test(s || ''); }
+  function isTime(s) { return /^\d{2}:\d{2}$/.test(s || ''); }
+  function isMonth(s) { return /^\d{4}-\d{2}$/.test(s || ''); }
+  function haversine(a, b, c, d) {
+    var R = 6371000, t = function (x) { return x * Math.PI / 180; }, dl = t(c - a), dg = t(d - b);
+    var h = Math.pow(Math.sin(dl / 2), 2) + Math.cos(t(a)) * Math.cos(t(c)) * Math.pow(Math.sin(dg / 2), 2);
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+  function fmtDist(m) { return m >= 1000 ? (m / 1000).toFixed(2) + ' กม.' : Math.round(m) + ' ม.'; }
+  function lateOf(t, S) { return t ? Math.max(0, toMin(t) - toMin(S.start) - (S.grace || 0)) : 0; }
+  function overlaps(a1, a2, b1, b2) { return a1 <= b2 && b1 <= a2; }
+
+  /* ---------- settings ---------- */
+  function settings(A) {
+    var raw = A.getSettings(), s = {};
+    for (var k in DEFAULTS) s[k] = (raw[k] !== undefined && str(raw[k]) !== '') ? str(raw[k]) : DEFAULTS[k];
+    s.lat = num(s.lat, 0); s.lng = num(s.lng, 0); s.radius = num(s.radius, 1000); s.grace = num(s.grace, 0);
+    s.workdays = String(s.workdays).split(',').filter(function (x) { return x !== ''; }).map(Number);
+    ['qPersonal', 'qSick', 'qVacation', 'qMaternity'].forEach(function (k) { s[k] = num(s[k], 0); });
+    return s;
+  }
+  function pubSettings(S) { var o = {}; PUBLIC_SETTINGS.forEach(function (k) { o[k] = S[k]; }); return o; }
+
+  /* ---------- data access ---------- */
+  function emps(A) { return A.rows(TABLES.EMP); }
+  function isActive(e) { return String(e.active).toUpperCase() !== 'FALSE'; }
+  function pubEmp(e) { return { id: e.id, code: e.code, name: e.name, gender: e.gender, position: e.position, photo: e.photo, email: e.email, phone: e.phone }; }
+  function recObj(r) { return { date: r.date, empId: r.empId, in: r.in, out: r.out, lateMin: num(r.lateMin, 0), inDist: num(r.inDist, null), outDist: num(r.outDist, null), note: r.note || '' }; }
+  function leaveObj(l) { return { id: l.id, empId: l.empId, code: l.code, name: l.name, type: l.type, start: l.start, end: l.end, part: l.part || 'full', days: num(l.days, 0), reason: l.reason, status: l.status, createdAt: l.createdAt, decidedAt: l.decidedAt, adminNote: l.adminNote || '' }; }
+  function adjObj(a) { return { id: a.id, empId: a.empId, code: a.code, name: a.name, date: a.date, in: a.in, out: a.out, reason: a.reason, status: a.status, createdAt: a.createdAt, decidedAt: a.decidedAt, adminNote: a.adminNote || '' }; }
+  function holidays(A) { return A.rows(TABLES.HOL).filter(function (h) { return isDate(h.date); }).map(function (h) { return { date: h.date, name: h.name }; }); }
+  function holMap(A) { var m = {}; holidays(A).forEach(function (h) { m[h.date] = h.name || 'วันหยุด'; }); return m; }
+  function isWork(c, d) { if (!c._hol) c._hol = holMap(c.A); return c.S.workdays.indexOf(dow(d)) >= 0 && !c._hol[d]; }
+  function leaveDays(c, start, end, part) {
+    if (part !== 'full') return isWork(c, start) ? 0.5 : 0;
+    return range(start, end).filter(function (d) { return isWork(c, d); }).length;
+  }
+  function quotaOf(e, S, type) { var col = QUOTA[type]; return col ? num(e[col], S[col]) : null; }
+  function usage(c, e, year) {
+    var out = {};
+    Object.keys(LEAVE_TYPES).forEach(function (t) { out[t] = { label: LEAVE_TYPES[t], quota: quotaOf(e, c.S, t), used: 0, pending: 0 }; });
+    c.A.rows(TABLES.LEAVE).forEach(function (l) {
+      if (l.empId !== e.id || String(l.start).slice(0, 4) !== String(year) || !out[l.type]) return;
+      if (l.status === 'approved') out[l.type].used += num(l.days, 0);
+      if (l.status === 'pending') out[l.type].pending += num(l.days, 0);
+    });
+    Object.keys(out).forEach(function (t) { var u = out[t]; u.left = u.quota === null ? null : u.quota - u.used; });
+    return out;
+  }
+  function stamp(e) { return { empId: e.id, code: e.code, name: e.name }; }
+  function merge(a, b) { var o = {}, k; for (k in a) o[k] = a[k]; for (k in b) o[k] = b[k]; return o; }
+
+  /* ---------- auth ---------- */
+  function ver(A, h) { return A.hmac('v|' + (h || '')).slice(0, 8); }
+  function sign(c, role, id, v, hours) {
+    var p = [role, id, v, c.now.ms + hours * 3600000].join('.');
+    return p + '.' + c.A.hmac(p);
+  }
+  function verify(c, tok) {
+    var parts = str(tok).split('.');
+    if (parts.length !== 5) return null;
+    var p = parts.slice(0, 4).join('.');
+    if (c.A.hmac(p) !== parts[4] || +parts[3] < c.now.ms) return null;
+    if (parts[0] === 'admin') return parts[2] === ver(c.A, c.S.adminHash) ? { role: 'admin', id: 'admin' } : null;
+    var e = emps(c.A).filter(function (x) { return x.id === parts[1]; })[0];
+    if (!e || !isActive(e) || parts[2] !== ver(c.A, e.passHash)) return null;
+    return { role: 'emp', id: e.id, emp: e };
+  }
+  function hashPw(A, pw) { var salt = A.uuid(); return salt + '$' + A.sha256(salt + '|' + pw); }
+  function checkPw(A, stored, pw) { var s = str(stored), i = s.indexOf('$'); return i > 0 && A.sha256(s.slice(0, i) + '|' + pw) === s.slice(i + 1); }
+  function validUser(u) { if (!/^[a-z0-9._-]{3,30}$/.test(u)) throw E('ชื่อผู้ใช้ต้องเป็น a-z, 0-9, . _ - ยาว 3–30 ตัว'); }
+  function validPw(pw) { if (String(pw).length < 6) throw E('รหัสผ่านต้องยาวอย่างน้อย 6 ตัวอักษร'); }
+  function usernameTaken(c, u, exceptId) {
+    if (u === str(c.S.adminUser).toLowerCase()) return true;
+    return emps(c.A).some(function (e) { return e.id !== exceptId && str(e.username).toLowerCase() === u; });
+  }
+  function throttle(c, key) {
+    var n = num(c.A.cacheGet(key), 0);
+    if (n >= 5) throw E('ลองผิดหลายครั้งเกินไป กรุณารอ 15 นาทีแล้วลองใหม่');
+    return function () { c.A.cachePut(key, String(n + 1), 900); };
+  }
+  function qrToken(c, date) { return c.A.hmac('qr|' + date).slice(0, 12); }
+
+  /* =================== public actions =================== */
+  function login(c) {
+    var u = str(c.p.username).toLowerCase(), pw = String(c.p.password || '');
+    if (!u || !pw) throw E('กรอกชื่อผู้ใช้และรหัสผ่าน');
+    var fail = throttle(c, 'fail:' + u);
+    if (c.p.as === 'admin') {
+      var ok = u === str(c.S.adminUser).toLowerCase() && (c.S.adminHash ? checkPw(c.A, c.S.adminHash, pw) : pw === DEFAULT_ADMIN_PASSWORD);
+      if (!ok) { fail(); throw E('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง'); }
+      return { role: 'admin', token: sign(c, 'admin', 'admin', ver(c.A, c.S.adminHash), 12), mustChange: !c.S.adminHash, name: c.S.adminUser };
+    }
+    var e = emps(c.A).filter(function (x) { return isActive(x) && str(x.username).toLowerCase() === u; })[0];
+    if (!e || !checkPw(c.A, e.passHash, pw)) { fail(); throw E('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง'); }
+    return { role: 'emp', token: sign(c, 'emp', e.id, ver(c.A, e.passHash), 24 * 60), emp: pubEmp(e) };
+  }
+
+  /** ลงทะเบียนครั้งแรก: ยืนยันตัวตนด้วยรหัสพนักงาน + เบอร์โทรที่แอดมินบันทึกไว้ แล้วตั้ง username/password เอง */
+  function register(c) {
+    var code = str(c.p.code).toLowerCase(), u = str(c.p.username).toLowerCase(), pw = String(c.p.password || '');
+    var fail = throttle(c, 'reg:' + code);
+    var e = emps(c.A).filter(function (x) { return isActive(x) && str(x.code).toLowerCase() === code; })[0];
+    if (!e || !digits(e.phone) || digits(e.phone) !== digits(c.p.phone)) { fail(); throw E('รหัสพนักงานหรือเบอร์โทรไม่ตรงกับข้อมูลในระบบ'); }
+    if (e.username) throw E('รหัสพนักงานนี้ตั้งบัญชีแล้ว หากลืมรหัสผ่านให้แจ้งแอดมินรีเซ็ต');
+    validUser(u); validPw(pw);
+    if (usernameTaken(c, u, e.id)) throw E('ชื่อผู้ใช้นี้มีคนใช้แล้ว');
+    var h = hashPw(c.A, pw);
+    c.A.update(TABLES.EMP, e, { username: u, passHash: h });
+    e.passHash = h;
+    return { role: 'emp', token: sign(c, 'emp', e.id, ver(c.A, h), 24 * 60), emp: pubEmp(e) };
+  }
+
+  /* =================== employee actions =================== */
+  function myEmp(c) { return c.sess.emp; }
+  function todayRec(c, empId) {
+    var r = c.A.rows(TABLES.REC).filter(function (x) { return x.empId === empId && x.date === c.now.date; })[0];
+    return r ? recObj(r) : null;
+  }
+  function me(c) {
+    var e = myEmp(c);
+    return {
+      emp: pubEmp(e), username: e.username, settings: pubSettings(c.S), today: c.now.date, now: c.now.time,
+      rec: todayRec(c, e.id), usage: usage(c, e, c.now.date.slice(0, 4)),
+      pending: c.A.rows(TABLES.LEAVE).filter(function (l) { return l.empId === e.id && l.status === 'pending'; }).length +
+        c.A.rows(TABLES.ADJ).filter(function (a) { return a.empId === e.id && a.status === 'pending'; }).length
+    };
+  }
+  function myMonth(c) {
+    var e = myEmp(c), m = str(c.p.month);
+    if (!isMonth(m)) throw E('เดือนไม่ถูกต้อง');
+    var data = monthData(c, m, [e]);
+    data.report = monthReport(m, [e], data.records, data.leaves, data.holidays, c.S, c.now.date)[0];
+    data.adjustments = c.A.rows(TABLES.ADJ).filter(function (a) { return a.empId === e.id && String(a.date).indexOf(m) === 0; }).map(adjObj);
+    return data;
+  }
+  function punch(c) {
+    var e = myEmp(c), S = c.S, date = c.now.date, time = c.now.time;
+    if (str(c.p.token2) !== qrToken(c, date)) throw E('QR Code ไม่ถูกต้องหรือหมดอายุ (ใช้ได้เฉพาะ QR ของวันนี้)');
+    var lat = Number(c.p.lat), lng = Number(c.p.lng);
+    if (!isFinite(lat) || !isFinite(lng) || (!lat && !lng)) throw E('ไม่ได้รับพิกัด GPS จากมือถือ');
+    var dist = Math.round(haversine(lat, lng, S.lat, S.lng));
+    if (dist > S.radius) throw E('อยู่ห่างออฟฟิศ ' + fmtDist(dist) + ' เกินรัศมีที่อนุญาต ' + fmtDist(S.radius));
+    var r = c.A.rows(TABLES.REC).filter(function (x) { return x.empId === e.id && x.date === date; })[0];
+    if (r) {
+      if (r.out) throw E('วันนี้ลงเวลาเข้า–ออกครบแล้ว');
+      c.A.update(TABLES.REC, r, { out: time, outDist: String(dist), updatedAt: c.now.iso });
+      return { kind: 'out', rec: recObj(merge(r, { out: time, outDist: dist })) };
+    }
+    var rec = merge(stamp(e), { date: date, in: time, out: '', lateMin: String(lateOf(time, S)), inDist: String(dist), outDist: '', note: '', updatedAt: c.now.iso });
+    c.A.insert(TABLES.REC, rec);
+    return { kind: 'in', rec: recObj(rec) };
+  }
+  function photo(c) {
+    var e = myEmp(c), m = String(c.p.data || '').match(/^data:(image\/\w+);base64,(.+)$/);
+    if (!m) throw E('ไฟล์รูปไม่ถูกต้อง');
+    if (m[2].length > 900000) throw E('รูปใหญ่เกินไป');
+    var url = c.A.savePhoto(e, m[1], m[2], c.p.data);
+    c.A.update(TABLES.EMP, e, { photo: url });
+    return { url: url };
+  }
+  function changePassword(c) {
+    var e = myEmp(c);
+    if (!checkPw(c.A, e.passHash, String(c.p.old || ''))) throw E('รหัสผ่านเดิมไม่ถูกต้อง');
+    validPw(c.p.password);
+    var h = hashPw(c.A, String(c.p.password));
+    c.A.update(TABLES.EMP, e, { passHash: h });
+    return { token: sign(c, 'emp', e.id, ver(c.A, h), 24 * 60) };
+  }
+  function leaveCreate(c) {
+    var e = myEmp(c), type = str(c.p.type), start = str(c.p.start), end = str(c.p.end) || start, part = str(c.p.part) || 'full', reason = str(c.p.reason);
+    if (!LEAVE_TYPES[type]) throw E('เลือกประเภทการลา');
+    if (!isDate(start) || !isDate(end) || end < start) throw E('ช่วงวันที่ไม่ถูกต้อง');
+    if (!PART[part]) throw E('เลือกเต็มวันหรือครึ่งวัน');
+    if (part !== 'full' && end !== start) throw E('ลาครึ่งวันได้ทีละ 1 วัน');
+    if (reason.length < 2) throw E('กรุณาระบุเหตุผลการลา');
+    if (start < addDays(c.now.date, -30)) throw E('ยื่นลาย้อนหลังได้ไม่เกิน 30 วัน');
+    if (range(start, end).length > 120) throw E('ช่วงลายาวเกินไป');
+    var days = leaveDays(c, start, end, part);
+    if (!days) throw E('ช่วงวันที่เลือกไม่มีวันทำงาน');
+    var clash = c.A.rows(TABLES.LEAVE).filter(function (l) {
+      return l.empId === e.id && (l.status === 'pending' || l.status === 'approved') && overlaps(start, end, l.start, l.end) &&
+        !(part !== 'full' && l.part !== 'full' && l.part !== part && start === l.start);
+    })[0];
+    if (clash) throw E('มีใบลาช่วงนี้อยู่แล้ว (' + LEAVE_TYPES[clash.type] + ' ' + clash.start + ')');
+    var u = usage(c, e, start.slice(0, 4))[type];
+    if (u.quota !== null && type !== 'sick' && u.used + u.pending + days > u.quota)
+      throw E(u.label + ' เหลือ ' + Math.max(0, u.quota - u.used - u.pending) + ' วัน (รวมที่รออนุมัติ) ไม่พอสำหรับ ' + days + ' วัน');
+    var l = merge(stamp(e), { id: 'L' + c.A.uuid(), type: type, start: start, end: end, part: part, days: String(days), reason: reason, status: 'pending', createdAt: c.now.iso, decidedAt: '', decidedBy: '', adminNote: '' });
+    c.A.insert(TABLES.LEAVE, l);
+    return leaveObj(l);
+  }
+  function leaveCancel(c) {
+    var e = myEmp(c), l = c.A.rows(TABLES.LEAVE).filter(function (x) { return x.id === str(c.p.id) && x.empId === e.id; })[0];
+    if (!l) throw E('ไม่พบใบลา');
+    if (l.status === 'approved' && l.start <= c.now.date) throw E('ใบลาที่อนุมัติแล้วและเริ่มไปแล้วยกเลิกเองไม่ได้ ติดต่อแอดมิน');
+    if (l.status !== 'pending' && l.status !== 'approved') throw E('ใบลานี้ยกเลิกไม่ได้');
+    c.A.update(TABLES.LEAVE, l, { status: 'cancelled', decidedAt: c.now.iso, decidedBy: 'employee' });
+    return true;
+  }
+  function adjCreate(c) {
+    var e = myEmp(c), date = str(c.p.date), tin = str(c.p.in), tout = str(c.p.out), reason = str(c.p.reason);
+    if (!isDate(date) || date > c.now.date) throw E('เลือกวันที่ที่ผ่านมาแล้วหรือวันนี้');
+    if (date < addDays(c.now.date, -45)) throw E('ขอแก้เวลาได้ย้อนหลังไม่เกิน 45 วัน');
+    if ((tin && !isTime(tin)) || (tout && !isTime(tout)) || (!tin && !tout)) throw E('ระบุเวลาเข้าและ/หรือเวลาออกที่ถูกต้อง');
+    if (tin && tout && tout <= tin) throw E('เวลาออกต้องหลังเวลาเข้า');
+    if (reason.length < 2) throw E('กรุณาระบุเหตุผล');
+    if (c.A.rows(TABLES.ADJ).some(function (a) { return a.empId === e.id && a.date === date && a.status === 'pending'; })) throw E('มีคำขอแก้เวลาของวันนี้รออนุมัติอยู่แล้ว');
+    var a = merge(stamp(e), { id: 'A' + c.A.uuid(), date: date, in: tin, out: tout, reason: reason, status: 'pending', createdAt: c.now.iso, decidedAt: '', decidedBy: '', adminNote: '' });
+    c.A.insert(TABLES.ADJ, a);
+    return adjObj(a);
+  }
+  function myRequests(c) {
+    var e = myEmp(c);
+    var lv = c.A.rows(TABLES.LEAVE).filter(function (l) { return l.empId === e.id; }).map(leaveObj);
+    var aj = c.A.rows(TABLES.ADJ).filter(function (a) { return a.empId === e.id; }).map(adjObj);
+    var by = function (a, b) { return String(b.createdAt).localeCompare(String(a.createdAt)); };
+    return { leaves: lv.sort(by).slice(0, 60), adjustments: aj.sort(by).slice(0, 60), usage: usage(c, e, c.now.date.slice(0, 4)) };
+  }
+
+  /* =================== admin actions =================== */
+  function monthData(c, m, list) {
+    var ids = {}; list.forEach(function (e) { ids[e.id] = 1; });
+    var mStart = m + '-01', mEnd = monthDays(m).slice(-1)[0];
+    return {
+      month: m, today: c.now.date, settings: pubSettings(c.S),
+      employees: list.map(pubEmp),
+      records: c.A.rows(TABLES.REC).filter(function (r) { return ids[r.empId] && String(r.date).indexOf(m) === 0; }).map(recObj),
+      leaves: c.A.rows(TABLES.LEAVE).filter(function (l) { return ids[l.empId] && (l.status === 'approved' || l.status === 'pending') && overlaps(l.start, l.end, mStart, mEnd); }).map(leaveObj),
+      holidays: holidays(c.A).filter(function (h) { return h.date.indexOf(m) === 0; })
+    };
+  }
+  function employeesForMonth(c, m) {
+    var has = {};
+    c.A.rows(TABLES.REC).forEach(function (r) { if (String(r.date).indexOf(m) === 0) has[r.empId] = 1; });
+    return emps(c.A).filter(function (e) { return isActive(e) || has[e.id]; });
+  }
+  function adminToday(c) {
+    var list = emps(c.A).filter(isActive), d = c.now.date;
+    var data = monthData(c, d.slice(0, 7), list);
+    return {
+      today: d, now: c.now.time, settings: pubSettings(c.S), employees: data.employees,
+      records: data.records.filter(function (r) { return r.date === d; }),
+      leaves: data.leaves.filter(function (l) { return l.start <= d && l.end >= d; }),
+      holiday: (holMap(c.A))[d] || '',
+      pending: pendingList(c)
+    };
+  }
+  function adminMonth(c) {
+    var m = str(c.p.month); if (!isMonth(m)) throw E('เดือนไม่ถูกต้อง');
+    var list = employeesForMonth(c, m), data = monthData(c, m, list);
+    data.report = monthReport(m, list, data.records, data.leaves, data.holidays, c.S, c.now.date);
+    return data;
+  }
+  function pendingList(c) {
+    var lv = c.A.rows(TABLES.LEAVE).filter(function (l) { return l.status === 'pending'; }).map(leaveObj);
+    var aj = c.A.rows(TABLES.ADJ).filter(function (a) { return a.status === 'pending'; }).map(adjObj);
+    return { leaves: lv, adjustments: aj };
+  }
+  function requests(c) {
+    var all = str(c.p.filter) === 'all', list = emps(c.A), byId = {};
+    list.forEach(function (e) { byId[e.id] = e; });
+    var lv = c.A.rows(TABLES.LEAVE).filter(function (l) { return all || l.status === 'pending'; }).map(function (l) {
+      var o = leaveObj(l), e = byId[l.empId];
+      if (e) { var u = usage(c, e, String(l.start).slice(0, 4))[l.type]; o.quota = u ? { quota: u.quota, used: u.used, pending: u.pending } : null; o.photo = e.photo; }
+      return o;
+    });
+    var aj = c.A.rows(TABLES.ADJ).filter(function (a) { return all || a.status === 'pending'; }).map(function (a) {
+      var o = adjObj(a), r = c.A.rows(TABLES.REC).filter(function (x) { return x.empId === a.empId && x.date === a.date; })[0];
+      o.current = r ? { in: r.in, out: r.out } : null; o.photo = byId[a.empId] ? byId[a.empId].photo : '';
+      return o;
+    });
+    var by = function (a, b) { return String(b.createdAt).localeCompare(String(a.createdAt)); };
+    return { leaves: lv.sort(by).slice(0, all ? 300 : 999), adjustments: aj.sort(by).slice(0, all ? 300 : 999) };
+  }
+  function upsertRecord(c, e, date, tin, tout, note) {
+    var r = c.A.rows(TABLES.REC).filter(function (x) { return x.empId === e.id && x.date === date; })[0];
+    var patch = { updatedAt: c.now.iso, note: note };
+    if (tin) { patch.in = tin; patch.lateMin = String(lateOf(tin, c.S)); }
+    if (tout) patch.out = tout;
+    if (r) { c.A.update(TABLES.REC, r, patch); return; }
+    if (!tin) throw E('วันนี้ยังไม่มีเวลาเข้างาน ต้องระบุเวลาเข้าด้วย');
+    c.A.insert(TABLES.REC, merge(stamp(e), merge({ date: date, in: '', out: '', lateMin: '0', inDist: '', outDist: '', note: '' }, patch)));
+  }
+  function decide(c) {
+    var kind = str(c.p.kind), id = str(c.p.id), dec = str(c.p.decision), note = str(c.p.note);
+    if (dec !== 'approved' && dec !== 'rejected') throw E('ผลการพิจารณาไม่ถูกต้อง');
+    var t = kind === 'leave' ? TABLES.LEAVE : kind === 'adj' ? TABLES.ADJ : null;
+    if (!t) throw E('ประเภทคำขอไม่ถูกต้อง');
+    var row = c.A.rows(t).filter(function (x) { return x.id === id; })[0];
+    if (!row) throw E('ไม่พบคำขอ');
+    if (row.status !== 'pending' && !(row.status === 'approved' && dec === 'rejected')) throw E('คำขอนี้ถูกพิจารณาไปแล้ว');
+    if (kind === 'adj' && dec === 'approved') {
+      var e = emps(c.A).filter(function (x) { return x.id === row.empId; })[0];
+      if (!e) throw E('ไม่พบพนักงาน');
+      upsertRecord(c, e, row.date, row.in, row.out, 'แก้เวลาตามคำขอ: ' + row.reason);
+    }
+    c.A.update(t, row, { status: dec, decidedAt: c.now.iso, decidedBy: 'admin', adminNote: note });
+    return true;
+  }
+  function employees(c) {
+    var y = c.now.date.slice(0, 4);
+    return emps(c.A).map(function (e) {
+      var o = pubEmp(e);
+      o.active = isActive(e); o.username = e.username || ''; o.hasLogin = !!e.passHash;
+      o.qPersonal = e.qPersonal; o.qSick = e.qSick; o.qVacation = e.qVacation; o.qMaternity = e.qMaternity; o.note = e.note || '';
+      o.usage = usage(c, e, y);
+      return o;
+    });
+  }
+  var EMP_FIELDS = ['code', 'name', 'gender', 'email', 'phone', 'position', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note'];
+  function cleanEmp(src) {
+    var o = {};
+    EMP_FIELDS.forEach(function (k) { if (src[k] !== undefined) o[k] = str(src[k]); });
+    if (o.phone !== undefined) o.phone = digits(o.phone);
+    return o;
+  }
+  function saveEmp(c) {
+    var v = cleanEmp(c.p.emp || {}), id = str((c.p.emp || {}).id), list = emps(c.A);
+    if (!v.code || !v.name) throw E('ต้องกรอกรหัสพนักงานและชื่อ');
+    var dup = list.filter(function (e) { return isActive(e) && e.id !== id && str(e.code).toLowerCase() === v.code.toLowerCase(); })[0];
+    if (dup) throw E('รหัสพนักงาน ' + v.code + ' ซ้ำกับ ' + dup.name);
+    if (id) {
+      var e = list.filter(function (x) { return x.id === id; })[0];
+      if (!e) throw E('ไม่พบพนักงาน');
+      c.A.update(TABLES.EMP, e, v); return { id: id };
+    }
+    var n = merge({ id: 'e' + c.A.uuid(), active: 'TRUE', photo: '', username: '', passHash: '' }, v);
+    c.A.insert(TABLES.EMP, n); return { id: n.id };
+  }
+  function importEmps(c) {
+    var rows = c.p.rows || [], added = 0, updated = 0;
+    rows.forEach(function (src) {
+      var v = cleanEmp(src); if (!v.code || !v.name) return;
+      var e = emps(c.A).filter(function (x) { return str(x.code).toLowerCase() === v.code.toLowerCase(); })[0];
+      if (e) { c.A.update(TABLES.EMP, e, merge(v, { active: 'TRUE' })); updated++; }
+      else { c.A.insert(TABLES.EMP, merge({ id: 'e' + c.A.uuid(), active: 'TRUE', photo: '', username: '', passHash: '' }, v)); added++; }
+    });
+    return { added: added, updated: updated };
+  }
+  function findEmp(c, id) { var e = emps(c.A).filter(function (x) { return x.id === id; })[0]; if (!e) throw E('ไม่พบพนักงาน'); return e; }
+  function delEmp(c) { c.A.update(TABLES.EMP, findEmp(c, str(c.p.id)), { active: 'FALSE' }); return true; }
+  function restoreEmp(c) { c.A.update(TABLES.EMP, findEmp(c, str(c.p.id)), { active: 'TRUE' }); return true; }
+  function resetLogin(c) { c.A.update(TABLES.EMP, findEmp(c, str(c.p.id)), { username: '', passHash: '' }); return true; }
+  function listHolidays(c) { return holidays(c.A).sort(function (a, b) { return a.date.localeCompare(b.date); }); }
+  function saveHoliday(c) {
+    var list = c.p.items || [{ date: c.p.date, name: c.p.name }], n = 0;
+    list.forEach(function (h) {
+      var d = str(h.date), name = str(h.name) || 'วันหยุด';
+      if (!isDate(d)) return;
+      var ex = c.A.rows(TABLES.HOL).filter(function (x) { return x.date === d; })[0];
+      if (ex) c.A.update(TABLES.HOL, ex, { name: name }); else c.A.insert(TABLES.HOL, { date: d, name: name });
+      n++;
+    });
+    if (!n) throw E('วันที่ไม่ถูกต้อง');
+    return listHolidays(c);
+  }
+  function delHoliday(c) {
+    var ex = c.A.rows(TABLES.HOL).filter(function (x) { return x.date === str(c.p.date); })[0];
+    if (ex) c.A.remove(TABLES.HOL, ex);
+    return listHolidays(c);
+  }
+  function saveSettings(c) {
+    var s = c.p.settings || {};
+    PUBLIC_SETTINGS.forEach(function (k) { if (s[k] !== undefined) c.A.setSetting(k, Array.isArray(s[k]) ? s[k].join(',') : str(s[k])); });
+    return pubSettings(settings(c.A));
+  }
+  function changeAdmin(c) {
+    var old = String(c.p.old || ''), u = str(c.p.username || c.S.adminUser).toLowerCase(), pw = String(c.p.password || '');
+    var okOld = c.S.adminHash ? checkPw(c.A, c.S.adminHash, old) : old === DEFAULT_ADMIN_PASSWORD;
+    if (!okOld) throw E('รหัสผ่านเดิมไม่ถูกต้อง');
+    validUser(u); validPw(pw);
+    if (pw === DEFAULT_ADMIN_PASSWORD) throw E('ห้ามใช้รหัสผ่านเริ่มต้น');
+    if (emps(c.A).some(function (e) { return str(e.username).toLowerCase() === u; })) throw E('ชื่อผู้ใช้นี้ซ้ำกับบัญชีพนักงาน');
+    var h = hashPw(c.A, pw);
+    c.A.setSetting('adminUser', u); c.A.setSetting('adminHash', h);
+    return { token: sign(c, 'admin', 'admin', ver(c.A, h), 12), name: u };
+  }
+  function qr(c) {
+    var d = c.now.date, t = qrToken(c, d), base = str(c.S.appUrl).replace(/[?#].*$/, '');
+    return { date: d, token: t, payload: base ? base + '?t=' + t : 'TESR-ATTEND|' + d + '|' + t };
+  }
+  function editRecord(c) {
+    var e = findEmp(c, str(c.p.empId)), date = str(c.p.date), tin = str(c.p.in), tout = str(c.p.out), note = str(c.p.note) || 'แก้ไขโดยแอดมิน';
+    if (!isDate(date)) throw E('วันที่ไม่ถูกต้อง');
+    if ((tin && !isTime(tin)) || (tout && !isTime(tout))) throw E('รูปแบบเวลาไม่ถูกต้อง');
+    var r = c.A.rows(TABLES.REC).filter(function (x) { return x.empId === e.id && x.date === date; })[0];
+    if (!tin && !tout) { if (r) c.A.remove(TABLES.REC, r); return true; }
+    if (r && !tout) c.A.update(TABLES.REC, r, { out: '' });
+    upsertRecord(c, e, date, tin, tout, note);
+    return true;
+  }
+  function buildMonth(c) {
+    var m = str(c.p.month); if (!isMonth(m)) throw E('เดือนไม่ถูกต้อง');
+    var list = employeesForMonth(c, m), d = monthData(c, m, list);
+    var rep = monthReport(m, list, d.records, d.leaves, d.holidays, c.S, c.now.date);
+    return { url: c.A.buildMonthSheet ? c.A.buildMonthSheet(m, rep, c.S, c.now) : '' };
+  }
+
+  /* =================== monthly report (pure) =================== */
+  /**
+   * สถานะรายวัน: ok มา · late สาย · absent ขาด · leave ลาทั้งวัน · pending วันนี้ยังไม่เข้า
+   *              holiday วันหยุดบริษัท · off วันหยุดประจำสัปดาห์ · future วันที่ยังมาไม่ถึง
+   * ลาครึ่งวันเช้าที่อนุมัติแล้ว ไม่นับสายวันนั้น · ลาครึ่งวันแต่ไม่มาเลย นับขาด 0.5 วัน
+   */
+  function monthReport(m, empList, recs, lvs, hols, S, today) {
+    var hm = {}; hols.forEach(function (h) { hm[h.date] = h.name || 'วันหยุด'; });
+    var days = monthDays(m);
+    return empList.map(function (e) {
+      var rby = {}, lby = {};
+      recs.forEach(function (r) { if (r.empId === e.id) rby[r.date] = r; });
+      lvs.forEach(function (l) {
+        if (l.empId !== e.id || (l.status !== 'approved' && l.status !== 'pending')) return;
+        range(l.start, l.end).forEach(function (d) { if (d.indexOf(m) === 0 && (!lby[d] || l.status === 'approved')) lby[d] = l; });
+      });
+      var t = { workdays: 0, present: 0, lateDays: 0, lateMin: 0, absent: 0, noOut: 0, minutes: 0, leaveDays: 0, leave: {} };
+      Object.keys(LEAVE_TYPES).forEach(function (k) { t.leave[k] = 0; });
+      var list = days.map(function (d) {
+        var work = S.workdays.indexOf(dow(d)) >= 0 && !hm[d];
+        var r = rby[d] || null, l = lby[d] || null, la = l && l.status === 'approved' ? l : null, late = 0, st;
+        if (la && work) { var amt = la.part === 'full' ? 1 : 0.5; t.leave[la.type] = (t.leave[la.type] || 0) + amt; t.leaveDays += amt; }
+        if (work && d <= today) t.workdays++;
+        if (r) {
+          t.present++;
+          late = la && la.part === 'am' ? 0 : num(r.lateMin, 0);
+          if (late > 0) { t.lateDays++; t.lateMin += late; }
+          if (r.out) t.minutes += Math.max(0, toMin(r.out) - toMin(r.in)); else if (d < today) t.noOut++;
+          st = late > 0 ? 'late' : 'ok';
+        } else if (!work) st = hm[d] ? 'holiday' : 'off';
+        else if (la && la.part === 'full') st = 'leave';
+        else if (d > today) st = 'future';
+        else if (d === today) st = 'pending';
+        else { st = 'absent'; t.absent += la ? 0.5 : 1; }
+        return { date: d, dow: dow(d), st: st, work: work, rec: r, leave: l, holiday: hm[d] || '', late: late };
+      });
+      t.hours = Math.round(t.minutes / 6) / 10;
+      return { emp: pubEmp(e), days: list, t: t };
+    });
+  }
+
+  /* =================== router =================== */
+  var PUBLIC = { login: login, register: register };
+  var EMP = { me: me, myMonth: myMonth, punch: punch, photo: photo, changePassword: changePassword, leaveCreate: leaveCreate, leaveCancel: leaveCancel, adjCreate: adjCreate, myRequests: myRequests };
+  var ADMIN = {
+    adminToday: adminToday, adminMonth: adminMonth, requests: requests, decide: decide, employees: employees, saveEmp: saveEmp,
+    importEmps: importEmps, delEmp: delEmp, restoreEmp: restoreEmp, resetLogin: resetLogin, holidays: listHolidays, saveHoliday: saveHoliday,
+    delHoliday: delHoliday, saveSettings: saveSettings, changeAdmin: changeAdmin, qr: qr, editRecord: editRecord, buildMonth: buildMonth,
+    settings: function (c) { return { settings: pubSettings(c.S), adminUser: c.S.adminUser, mustChange: !c.S.adminHash }; }
+  };
+  function run(A, p) {
+    var c = { A: A, p: p, now: A.now() };
+    c.S = settings(A);
+    if (PUBLIC[p.action]) return PUBLIC[p.action](c);
+    var sess = verify(c, p.token);
+    if (!sess) throw E('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่', 'AUTH');
+    c.sess = sess;
+    if (sess.role === 'emp' && EMP[p.action]) return EMP[p.action](c);
+    if (sess.role === 'admin' && ADMIN[p.action]) return ADMIN[p.action](c);
+    throw E('บัญชีนี้ไม่มีสิทธิ์ใช้งานส่วนนี้', 'FORBIDDEN');
+  }
+  function handle(A, p) {
+    p = p || {};
+    try {
+      var data = WRITES[p.action] ? A.lock(function () { return run(A, p); }) : run(A, p);
+      return { ok: true, data: data };
+    } catch (e) {
+      return { ok: false, error: e.message || String(e), code: e.code || '' };
+    }
+  }
+
+  return {
+    handle: handle, monthReport: monthReport, TABLES: TABLES, LEAVE_TYPES: LEAVE_TYPES, PART: PART, STATUS: STATUS,
+    DEFAULTS: DEFAULTS, util: { monthDays: monthDays, dow: dow, addDays: addDays, range: range, toMin: toMin, haversine: haversine, fmtDist: fmtDist, lateOf: lateOf, isDate: isDate, isTime: isTime }
+  };
+})();
