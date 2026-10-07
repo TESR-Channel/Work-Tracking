@@ -22,6 +22,7 @@ var TC = (function () {
     adminUser: 'admin', adminHash: '', adminPassword: ''
   };
   var DEFAULT_ADMIN_PASSWORD = 'tesr1234';
+  var ADJ_WINDOW = 60; // ขอแก้เวลาย้อนหลังได้ไม่เกิน 60 วัน
   var PUBLIC_SETTINGS = ['company', 'office', 'lat', 'lng', 'radius', 'start', 'end', 'grace', 'workdays', 'appUrl', 'qPersonal', 'qSick', 'qVacation', 'qMaternity'];
   var WRITES = {
     login: 1, register: 1, punch: 1, photo: 1, changePassword: 1, leaveCreate: 1, leaveCancel: 1, adjCreate: 1,
@@ -281,7 +282,7 @@ var TC = (function () {
   function adjCreate(c) {
     var e = myEmp(c), date = str(c.p.date), tin = str(c.p.in), tout = str(c.p.out), reason = str(c.p.reason);
     if (!isDate(date) || date > c.now.date) throw E('เลือกวันที่ที่ผ่านมาแล้วหรือวันนี้');
-    if (date < addDays(c.now.date, -45)) throw E('ขอแก้เวลาได้ย้อนหลังไม่เกิน 45 วัน');
+    if (date < addDays(c.now.date, -ADJ_WINDOW)) throw E('ขอแก้เวลาได้ย้อนหลังไม่เกิน ' + ADJ_WINDOW + ' วัน');
     if ((tin && !isTime(tin)) || (tout && !isTime(tout)) || (!tin && !tout)) throw E('ระบุเวลาเข้าและ/หรือเวลาออกที่ถูกต้อง');
     if (tin && tout && tout <= tin) throw E('เวลาออกต้องหลังเวลาเข้า');
     if (reason.length < 2) throw E('กรุณาระบุเหตุผล');
@@ -548,6 +549,54 @@ var TC = (function () {
     });
   }
 
+  /* =================== รายงานรายเดือนแบบละเอียด (รูปแบบเดียวกับไฟล์ Export AllSum เดิม) =================== */
+  /** ชั่วโมงงานมาตรฐานของวัน: ช่วงเวลางาน หักพักกลางวัน 1 ชม. เมื่อกะยาว 6 ชม.ขึ้นไป (09:00–18:00 = 8:00, 09:20–12:20 = 3:00) */
+  function stdMinutes(sh) { var span = toMin(sh.end) - toMin(sh.start); return Math.max(0, span >= 360 ? span - 60 : span); }
+  function hmm(m) { m = Math.round(m || 0); return m > 0 ? Math.floor(m / 60) + ':' + pad(m % 60) : ' - '; }
+  var EXPORT_LEAVES = [['personal', 'ลากิจ'], ['sick', 'ลาป่วย'], ['vacation', 'ลาพักร้อน'], ['other', 'ลาอื่นๆ']];
+  function exportTable(m, rep, S, today) {
+    var p = m.split('-');
+    var head1 = ['รหัสพนักงาน', 'ชื่อพนักงาน', 'วันที่', 'เวลาทำงาน', 'บันทึกเวลา', 'ชั่วโมง:นาที', '', '', '', 'จำนวน', '', 'จำนวนวันหยุด', '', '', 'จำนวนวันลา', '', '', '', 'หมายเหตุ'];
+    var head2 = ['', '', '', '', '', 'ชม.งาน', 'มาสาย', 'กลับก่อน', 'ขาดงาน', 'ไม่มา', 'ลืมบันทึก', 'ประจำปี', 'ประจำสัปดาห์', 'ชดเชย', 'ลากิจ', 'ลาป่วย', 'ลาพักร้อน', 'ลาอื่นๆ', ''];
+    var merges = [[0, 0, 1, 0], [0, 1, 1, 1], [0, 2, 1, 2], [0, 3, 1, 3], [0, 4, 1, 4], [0, 5, 0, 8], [0, 9, 0, 10], [0, 11, 0, 13], [0, 14, 0, 17], [0, 18, 1, 18]];
+    var rows = [];
+    rep.forEach(function (r) {
+      var e = r.emp, T = { work: 0, late: 0, early: 0, miss: 0, absent: 0, forgot: 0, hol: 0, off: 0, comp: 0, lv: { personal: 0, sick: 0, vacation: 0, other: 0 } };
+      r.days.forEach(function (x) {
+        var sh = x.shift || shiftOf(e, S, x.date), std = stdMinutes(sh), rec = x.rec, la = x.leave && x.leave.status === 'approved' ? x.leave : null;
+        var c = [e.code, e.name, x.date.slice(8) + '/' + p[1] + '/' + p[0], sh.start + ' ' + sh.end, rec ? (rec.in + (rec.out ? ' ' + rec.out : '')) : '', ' - ', ' - ', ' - ', ' - ', '-', '-', '-', '-', '-', '-', '-', '-', '-', ''];
+        var notes = [];
+        if (x.date <= today) {
+          if (rec && rec.out) {
+            var w = Math.max(0, (la && la.part !== 'full' ? std / 2 : std) - x.late - x.early);
+            T.work += w; c[5] = hmm(w);
+          }
+          if (x.late) { T.late += x.late; c[6] = hmm(x.late); }
+          if (x.early) { T.early += x.early; c[7] = hmm(x.early); }
+          var miss = 0;
+          if (x.st === 'absent') { miss = la ? std / 2 : std; T.absent += la ? 0.5 : 1; c[9] = la ? 0.5 : 1; }
+          else if (rec && !rec.out && x.date < today) { miss = std; T.forgot++; c[10] = 1; notes.push('ลืมบันทึกเวลาออก'); }
+          else miss = x.late + x.early;
+          if (miss) { T.miss += miss; c[8] = hmm(miss); }
+        }
+        if (x.holiday) { if (/ชดเชย/.test(x.holiday)) { T.comp++; c[13] = 1; } else { T.hol++; c[11] = 1; } notes.push(x.holiday); }
+        else if (!x.work && !rec) { T.off++; c[12] = 1; }
+        if (la && x.work) {
+          var k = la.type === 'personal' || la.type === 'sick' || la.type === 'vacation' ? la.type : 'other', amt = la.part === 'full' ? 1 : 0.5;
+          T.lv[k] += amt; c[14 + ['personal', 'sick', 'vacation', 'other'].indexOf(k)] = amt;
+          notes.push(LEAVE_TYPES[la.type] + (la.part !== 'full' ? ' (' + PART[la.part] + ')' : '') + (la.reason ? ': ' + la.reason : ''));
+        } else if (x.leave && x.leave.status === 'pending') notes.push(LEAVE_TYPES[x.leave.type] + ' รออนุมัติ');
+        if (rec && rec.note) notes.push(rec.note);
+        c[18] = notes.join(' · ');
+        rows.push({ cells: c, total: false, flags: x.flags || [], st: x.st, future: x.date > today });
+      });
+      var dash = function (v) { return v ? v : '-'; };
+      rows.push({ total: true, cells: [e.code, e.name, '', '', 'ยอดรวม', hmm(T.work), hmm(T.late), hmm(T.early), hmm(T.miss), dash(T.absent), dash(T.forgot), dash(T.hol), dash(T.off), dash(T.comp), dash(T.lv.personal), dash(T.lv.sick), dash(T.lv.vacation), dash(T.lv.other),
+        'ตรงเวลา ' + (r.t.onTimeRate === null ? '-' : r.t.onTimeRate + '%') + ' · มาทำงาน ' + (r.t.attendRate === null ? '-' : r.t.attendRate + '%')] });
+    });
+    return { head1: head1, head2: head2, merges: merges, rows: rows };
+  }
+
   /* =================== router =================== */
   var PUBLIC = { login: login };
   var EMP = { me: me, myMonth: myMonth, punch: punch, photo: photo, changePassword: changePassword, leaveCreate: leaveCreate, leaveCancel: leaveCancel, adjCreate: adjCreate, myRequests: myRequests };
@@ -582,7 +631,7 @@ var TC = (function () {
   }
 
   return {
-    handle: handle, monthReport: monthReport, TABLES: TABLES, LEAVE_TYPES: LEAVE_TYPES, PART: PART, STATUS: STATUS,
+    handle: handle, monthReport: monthReport, exportTable: exportTable, ADJ_WINDOW: ADJ_WINDOW, TABLES: TABLES, LEAVE_TYPES: LEAVE_TYPES, PART: PART, STATUS: STATUS,
     DEFAULTS: DEFAULTS, util: { monthDays: monthDays, dow: dow, addDays: addDays, range: range, toMin: toMin, haversine: haversine, fmtDist: fmtDist, lateOf: lateOf, shiftOf: shiftOf, daysOf: daysOf, parseDays: parseDays, daysText: daysText, scheduleText: scheduleText, parseDayTimes: parseDayTimes, dayTimesText: dayTimesText, customSchedule: customSchedule, isDate: isDate, isTime: isTime }
   };
 })();

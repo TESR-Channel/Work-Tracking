@@ -11,7 +11,8 @@
  *   Adjustments  คำขอแก้เวลา + ผลอนุมัติ
  *   Holidays     วันหยุดบริษัท
  *   Settings     ตั้งค่าระบบ
- *   สรุป yyyy-MM สรุปรายเดือนสำหรับทำเงินเดือน (สร้างใหม่ทุกคืน)
+ *   สรุป yyyy-MM รายงานรายวันทุกคน + ยอดรวม (รูปแบบเดียวกับไฟล์ Export AllSum เดิม)
+ *   KPI yyyy-MM  สรุปต่อคน: แจ้งเตือน, ตรงเวลา %, มาทำงาน %
  */
 
 const TZ = 'Asia/Bangkok';
@@ -178,45 +179,58 @@ function photoFolder_() {
 }
 
 /* ===================== ชีตสรุปรายเดือน ===================== */
+/**
+ * สร้าง 2 ชีตต่อเดือน
+ *   "สรุป yyyy-MM" : รายวันทุกคนทุกวัน + แถวยอดรวมต่อคน (รูปแบบเดียวกับไฟล์ Export AllSum เดิม)
+ *   "KPI yyyy-MM"  : สรุปต่อคนหนึ่งบรรทัด พร้อมแจ้งเตือนและอัตราตรงเวลา / มาทำงาน
+ */
 function writeMonthSheet_(m, rep, S, now) {
-  const ss = SpreadsheetApp.getActive(), today = now.date, [y, mo] = m.split('-').map(Number);
-  const LT = TC.LEAVE_TYPES, types = Object.keys(LT);
+  const ss = SpreadsheetApp.getActive(), [y, mo] = m.split('-').map(Number);
+  const tbl = TC.exportTable(m, rep, S, now.date);
+
+  // ---------- รายวัน ----------
   const name = 'สรุป ' + m;
   let sh = ss.getSheetByName(name);
   if (sh) sh.clear(); else sh = ss.insertSheet(name);
-
-  sh.getRange(1, 1).setValue('สรุปการทำงาน เดือน' + TH_MF[mo - 1] + ' ' + (y + 543) + ' · ' + S.company).setFontSize(14).setFontWeight('bold');
-  sh.getRange(2, 1).setValue('เวลางานบริษัท ' + S.start + '–' + S.end + (S.grace ? ' (ผ่อนผัน ' + S.grace + ' นาที)' : '') + ' · คนที่มีเวลางานของตัวเองนับสายตามเวลาของคนนั้น · นับถึงวันที่ ' + today + ' · อัปเดต ' + now.iso.replace('T', ' ')).setFontColor('#6b625a');
-
-  const sumH = ['รหัส', 'ชื่อ', 'ตำแหน่ง', 'เวลางาน', 'แจ้งเตือน', 'วันทำงาน', 'มาทำงาน', 'ขาด (วัน)', 'มาสาย (ครั้ง)', 'สายรวม (นาที)', 'ออกก่อน (ครั้ง)', 'ออกก่อนรวม (นาที)', 'ลืมเช็คเอาท์']
-    .concat(types.map(t => LT[t] + ' (วัน)')).concat(['ชั่วโมงในออฟฟิศ', 'ตรงเวลา (%)', 'มาทำงาน (%)']);
-  const alertText = t => [t.lateDays ? 'สาย ' + t.lateDays : '', t.earlyDays ? 'ออกก่อน ' + t.earlyDays : '', t.noOut ? 'ลืมเช็คเอาท์ ' + t.noOut : '', t.absent ? 'ขาด ' + t.absent : ''].filter(String).join(' · ') || 'ปกติ';
-  const sum = rep.map(r => [r.emp.code, r.emp.name, r.emp.position, TC.util.scheduleText(r.emp, S), alertText(r.t), r.t.workdays, r.t.present, r.t.absent, r.t.lateDays, r.t.lateMin, r.t.earlyDays, r.t.earlyMin, r.t.noOut]
-    .concat(types.map(t => r.t.leave[t] || 0)).concat([r.t.hours, r.t.onTimeRate === null ? '' : r.t.onTimeRate, r.t.attendRate === null ? '' : r.t.attendRate]));
-  head_(sh.getRange(4, 1, 1, sumH.length).setValues([sumH]));
-  if (sum.length) { sh.getRange(5, 1, sum.length, 1).setNumberFormat('@'); sh.getRange(5, 1, sum.length, sumH.length).setValues(sum); }
-
-  const d0 = 5 + sum.length + 2;
-  sh.getRange(d0 - 1, 1).setValue('รายละเอียดรายวัน').setFontWeight('bold');
-  const detH = ['วันที่', 'วัน', 'รหัส', 'ชื่อ', 'เวลางาน', 'สถานะ', 'เข้างาน', 'ออกงาน', 'สาย (นาที)', 'ออกก่อน (นาที)', 'แจ้งเตือน', 'การลา', 'หมายเหตุ'];
-  const FL = { late: 'สาย', early: 'ออกก่อนเวลา', noOut: 'ลืมเช็คเอาท์', absent: 'ขาด' };
-  head_(sh.getRange(d0, 1, 1, detH.length).setValues([detH]));
-  const det = [], bg = [];
-  rep.forEach(r => r.days.forEach(x => {
-    if (x.date > today) return;
-    if (!x.work && !x.rec && !(x.leave && x.leave.status === 'approved')) return;
-    const lv = x.leave ? LT[x.leave.type] + (x.leave.part !== 'full' ? ' (' + TC.PART[x.leave.part] + ')' : '') + (x.leave.status !== 'approved' ? ' [รออนุมัติ]' : '') : '';
-    const out = x.rec ? (x.rec.out || (x.date < today ? 'ไม่ได้เช็คเอาท์' : '')) : '';
-    det.push([x.date, TH_D[x.dow], r.emp.code, r.emp.name, x.shift ? x.shift.start + '-' + x.shift.end : '', ST_TH[x.st] || '', x.rec ? x.rec.in : '', out, x.rec ? x.late : '', x.rec ? x.early : '', x.flags.map(f => FL[f]).join(', '), lv, x.rec && x.rec.note ? x.rec.note : (x.holiday || '')]);
-    const c = x.st === 'absent' || x.flags.indexOf('noOut') >= 0 ? '#fbe1df' : x.flags.length ? '#fbead6' : x.st === 'leave' ? '#e3ecfb' : null;
-    bg.push(Array(detH.length).fill(c));
-  }));
-  if (det.length) {
-    [1, 3, 5, 7, 8].forEach(c => sh.getRange(d0 + 1, c, det.length, 1).setNumberFormat('@'));
-    sh.getRange(d0 + 1, 1, det.length, detH.length).setValues(det).setBackgrounds(bg);
+  sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).breakApart();
+  const W = tbl.head1.length;
+  sh.getRange(1, 1, 2, W).setValues([tbl.head1, tbl.head2]).setFontWeight('bold').setBackground('#8B0000').setFontColor('#ffffff')
+    .setHorizontalAlignment('center').setVerticalAlignment('middle').setWrap(true);
+  tbl.merges.forEach(g => sh.getRange(g[0] + 1, g[1] + 1, g[2] - g[0] + 1, g[3] - g[1] + 1).merge());
+  if (tbl.rows.length) {
+    const body = sh.getRange(3, 1, tbl.rows.length, W);
+    body.setNumberFormat('@').setValues(tbl.rows.map(r => r.cells.map(String)));
+    const bg = tbl.rows.map(r => {
+      const c = r.total ? '#fffdd0' : r.st === 'absent' || r.flags.indexOf('noOut') >= 0 ? '#fbe1df' : r.flags.length ? '#fbead6' : r.st === 'leave' ? '#e3ecfb' : (r.st === 'off' || r.st === 'holiday') ? '#f3f0ec' : null;
+      return Array(W).fill(c);
+    });
+    body.setBackgrounds(bg).setVerticalAlignment('middle');
+    sh.getRange(3, 3, tbl.rows.length, W - 3).setHorizontalAlignment('center');
+    sh.getRange(3, W, tbl.rows.length, 1).setHorizontalAlignment('left');
+    tbl.rows.forEach((r, i) => { if (r.total) sh.getRange(3 + i, 1, 1, W).setFontWeight('bold'); });
   }
-  sh.setColumnWidth(1, 95); sh.setColumnWidth(2, 170); sh.setColumnWidth(3, 130);
-  for (let c = 4; c <= sumH.length; c++) sh.setColumnWidth(c, 100);
+  sh.setFrozenRows(2); sh.setFrozenColumns(2);
+  [95, 190, 90, 100, 100, 60, 60, 60, 60, 50, 60, 55, 70, 50, 50, 50, 60, 55, 280].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+
+  // ---------- KPI ----------
+  const kn = 'KPI ' + m;
+  let ks = ss.getSheetByName(kn);
+  if (ks) ks.clear(); else ks = ss.insertSheet(kn);
+  const LT = TC.LEAVE_TYPES, types = Object.keys(LT);
+  ks.getRange(1, 1).setValue('สรุปการทำงาน เดือน' + TH_MF[mo - 1] + ' ' + (y + 543) + ' · ' + S.company).setFontSize(14).setFontWeight('bold');
+  ks.getRange(2, 1).setValue('นับถึงวันที่ ' + now.date + ' · อัปเดต ' + now.iso.replace('T', ' ') + ' · สาย/กลับก่อนเทียบกับเวลางานของแต่ละคนในแต่ละวัน').setFontColor('#6b625a');
+  const kh = ['รหัส', 'ชื่อ', 'ตำแหน่ง', 'เวลางาน', 'แจ้งเตือน', 'วันทำงาน', 'มาทำงาน', 'ขาด (วัน)', 'มาสาย (ครั้ง)', 'สายรวม (นาที)', 'กลับก่อน (ครั้ง)', 'กลับก่อนรวม (นาที)', 'ลืมบันทึก']
+    .concat(types.map(t => LT[t] + ' (วัน)')).concat(['ชั่วโมงในออฟฟิศ', 'ตรงเวลา (%)', 'มาทำงาน (%)']);
+  const alertText = t => [t.lateDays ? 'สาย ' + t.lateDays : '', t.earlyDays ? 'กลับก่อน ' + t.earlyDays : '', t.noOut ? 'ลืมบันทึก ' + t.noOut : '', t.absent ? 'ขาด ' + t.absent : ''].filter(String).join(' · ') || 'ปกติ';
+  const kr = rep.map(r => [r.emp.code, r.emp.name, r.emp.position, TC.util.scheduleText(r.emp, S), alertText(r.t), r.t.workdays, r.t.present, r.t.absent, r.t.lateDays, r.t.lateMin, r.t.earlyDays, r.t.earlyMin, r.t.noOut]
+    .concat(types.map(t => r.t.leave[t] || 0)).concat([r.t.hours, r.t.onTimeRate === null ? '' : r.t.onTimeRate, r.t.attendRate === null ? '' : r.t.attendRate]));
+  head_(ks.getRange(4, 1, 1, kh.length).setValues([kh]));
+  if (kr.length) {
+    ks.getRange(5, 1, kr.length, 1).setNumberFormat('@');
+    ks.getRange(5, 1, kr.length, kh.length).setValues(kr);
+    ks.getRange(5, 5, kr.length, 1).setBackgrounds(kr.map(r => [r[4] === 'ปกติ' ? '#dff1e7' : '#fbead6']));
+  }
+  ks.setColumnWidth(1, 90); ks.setColumnWidth(2, 180); ks.setColumnWidth(3, 120); ks.setColumnWidth(4, 230); ks.setColumnWidth(5, 220);
   return ss.getUrl() + '#gid=' + sh.getSheetId();
 }
 function head_(rg) { rg.setFontWeight('bold').setBackground('#8B0000').setFontColor('#ffffff').setWrap(true); }
@@ -247,6 +261,7 @@ var TC = (function () {
     adminUser: 'admin', adminHash: '', adminPassword: ''
   };
   var DEFAULT_ADMIN_PASSWORD = 'tesr1234';
+  var ADJ_WINDOW = 60; // ขอแก้เวลาย้อนหลังได้ไม่เกิน 60 วัน
   var PUBLIC_SETTINGS = ['company', 'office', 'lat', 'lng', 'radius', 'start', 'end', 'grace', 'workdays', 'appUrl', 'qPersonal', 'qSick', 'qVacation', 'qMaternity'];
   var WRITES = {
     login: 1, register: 1, punch: 1, photo: 1, changePassword: 1, leaveCreate: 1, leaveCancel: 1, adjCreate: 1,
@@ -506,7 +521,7 @@ var TC = (function () {
   function adjCreate(c) {
     var e = myEmp(c), date = str(c.p.date), tin = str(c.p.in), tout = str(c.p.out), reason = str(c.p.reason);
     if (!isDate(date) || date > c.now.date) throw E('เลือกวันที่ที่ผ่านมาแล้วหรือวันนี้');
-    if (date < addDays(c.now.date, -45)) throw E('ขอแก้เวลาได้ย้อนหลังไม่เกิน 45 วัน');
+    if (date < addDays(c.now.date, -ADJ_WINDOW)) throw E('ขอแก้เวลาได้ย้อนหลังไม่เกิน ' + ADJ_WINDOW + ' วัน');
     if ((tin && !isTime(tin)) || (tout && !isTime(tout)) || (!tin && !tout)) throw E('ระบุเวลาเข้าและ/หรือเวลาออกที่ถูกต้อง');
     if (tin && tout && tout <= tin) throw E('เวลาออกต้องหลังเวลาเข้า');
     if (reason.length < 2) throw E('กรุณาระบุเหตุผล');
@@ -773,6 +788,54 @@ var TC = (function () {
     });
   }
 
+  /* =================== รายงานรายเดือนแบบละเอียด (รูปแบบเดียวกับไฟล์ Export AllSum เดิม) =================== */
+  /** ชั่วโมงงานมาตรฐานของวัน: ช่วงเวลางาน หักพักกลางวัน 1 ชม. เมื่อกะยาว 6 ชม.ขึ้นไป (09:00–18:00 = 8:00, 09:20–12:20 = 3:00) */
+  function stdMinutes(sh) { var span = toMin(sh.end) - toMin(sh.start); return Math.max(0, span >= 360 ? span - 60 : span); }
+  function hmm(m) { m = Math.round(m || 0); return m > 0 ? Math.floor(m / 60) + ':' + pad(m % 60) : ' - '; }
+  var EXPORT_LEAVES = [['personal', 'ลากิจ'], ['sick', 'ลาป่วย'], ['vacation', 'ลาพักร้อน'], ['other', 'ลาอื่นๆ']];
+  function exportTable(m, rep, S, today) {
+    var p = m.split('-');
+    var head1 = ['รหัสพนักงาน', 'ชื่อพนักงาน', 'วันที่', 'เวลาทำงาน', 'บันทึกเวลา', 'ชั่วโมง:นาที', '', '', '', 'จำนวน', '', 'จำนวนวันหยุด', '', '', 'จำนวนวันลา', '', '', '', 'หมายเหตุ'];
+    var head2 = ['', '', '', '', '', 'ชม.งาน', 'มาสาย', 'กลับก่อน', 'ขาดงาน', 'ไม่มา', 'ลืมบันทึก', 'ประจำปี', 'ประจำสัปดาห์', 'ชดเชย', 'ลากิจ', 'ลาป่วย', 'ลาพักร้อน', 'ลาอื่นๆ', ''];
+    var merges = [[0, 0, 1, 0], [0, 1, 1, 1], [0, 2, 1, 2], [0, 3, 1, 3], [0, 4, 1, 4], [0, 5, 0, 8], [0, 9, 0, 10], [0, 11, 0, 13], [0, 14, 0, 17], [0, 18, 1, 18]];
+    var rows = [];
+    rep.forEach(function (r) {
+      var e = r.emp, T = { work: 0, late: 0, early: 0, miss: 0, absent: 0, forgot: 0, hol: 0, off: 0, comp: 0, lv: { personal: 0, sick: 0, vacation: 0, other: 0 } };
+      r.days.forEach(function (x) {
+        var sh = x.shift || shiftOf(e, S, x.date), std = stdMinutes(sh), rec = x.rec, la = x.leave && x.leave.status === 'approved' ? x.leave : null;
+        var c = [e.code, e.name, x.date.slice(8) + '/' + p[1] + '/' + p[0], sh.start + ' ' + sh.end, rec ? (rec.in + (rec.out ? ' ' + rec.out : '')) : '', ' - ', ' - ', ' - ', ' - ', '-', '-', '-', '-', '-', '-', '-', '-', '-', ''];
+        var notes = [];
+        if (x.date <= today) {
+          if (rec && rec.out) {
+            var w = Math.max(0, (la && la.part !== 'full' ? std / 2 : std) - x.late - x.early);
+            T.work += w; c[5] = hmm(w);
+          }
+          if (x.late) { T.late += x.late; c[6] = hmm(x.late); }
+          if (x.early) { T.early += x.early; c[7] = hmm(x.early); }
+          var miss = 0;
+          if (x.st === 'absent') { miss = la ? std / 2 : std; T.absent += la ? 0.5 : 1; c[9] = la ? 0.5 : 1; }
+          else if (rec && !rec.out && x.date < today) { miss = std; T.forgot++; c[10] = 1; notes.push('ลืมบันทึกเวลาออก'); }
+          else miss = x.late + x.early;
+          if (miss) { T.miss += miss; c[8] = hmm(miss); }
+        }
+        if (x.holiday) { if (/ชดเชย/.test(x.holiday)) { T.comp++; c[13] = 1; } else { T.hol++; c[11] = 1; } notes.push(x.holiday); }
+        else if (!x.work && !rec) { T.off++; c[12] = 1; }
+        if (la && x.work) {
+          var k = la.type === 'personal' || la.type === 'sick' || la.type === 'vacation' ? la.type : 'other', amt = la.part === 'full' ? 1 : 0.5;
+          T.lv[k] += amt; c[14 + ['personal', 'sick', 'vacation', 'other'].indexOf(k)] = amt;
+          notes.push(LEAVE_TYPES[la.type] + (la.part !== 'full' ? ' (' + PART[la.part] + ')' : '') + (la.reason ? ': ' + la.reason : ''));
+        } else if (x.leave && x.leave.status === 'pending') notes.push(LEAVE_TYPES[x.leave.type] + ' รออนุมัติ');
+        if (rec && rec.note) notes.push(rec.note);
+        c[18] = notes.join(' · ');
+        rows.push({ cells: c, total: false, flags: x.flags || [], st: x.st, future: x.date > today });
+      });
+      var dash = function (v) { return v ? v : '-'; };
+      rows.push({ total: true, cells: [e.code, e.name, '', '', 'ยอดรวม', hmm(T.work), hmm(T.late), hmm(T.early), hmm(T.miss), dash(T.absent), dash(T.forgot), dash(T.hol), dash(T.off), dash(T.comp), dash(T.lv.personal), dash(T.lv.sick), dash(T.lv.vacation), dash(T.lv.other),
+        'ตรงเวลา ' + (r.t.onTimeRate === null ? '-' : r.t.onTimeRate + '%') + ' · มาทำงาน ' + (r.t.attendRate === null ? '-' : r.t.attendRate + '%')] });
+    });
+    return { head1: head1, head2: head2, merges: merges, rows: rows };
+  }
+
   /* =================== router =================== */
   var PUBLIC = { login: login };
   var EMP = { me: me, myMonth: myMonth, punch: punch, photo: photo, changePassword: changePassword, leaveCreate: leaveCreate, leaveCancel: leaveCancel, adjCreate: adjCreate, myRequests: myRequests };
@@ -807,7 +870,7 @@ var TC = (function () {
   }
 
   return {
-    handle: handle, monthReport: monthReport, TABLES: TABLES, LEAVE_TYPES: LEAVE_TYPES, PART: PART, STATUS: STATUS,
+    handle: handle, monthReport: monthReport, exportTable: exportTable, ADJ_WINDOW: ADJ_WINDOW, TABLES: TABLES, LEAVE_TYPES: LEAVE_TYPES, PART: PART, STATUS: STATUS,
     DEFAULTS: DEFAULTS, util: { monthDays: monthDays, dow: dow, addDays: addDays, range: range, toMin: toMin, haversine: haversine, fmtDist: fmtDist, lateOf: lateOf, shiftOf: shiftOf, daysOf: daysOf, parseDays: parseDays, daysText: daysText, scheduleText: scheduleText, parseDayTimes: parseDayTimes, dayTimesText: dayTimesText, customSchedule: customSchedule, isDate: isDate, isTime: isTime }
   };
 })();
