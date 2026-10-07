@@ -295,29 +295,47 @@ function vMe(el) {
   document.getElementById('lo').onclick = function () { logout(); };
 }
 
-/* ================= punch: 1) QR 2) GPS 3) ยืนยัน ================= */
+/* รหัสประจำเครื่อง: สุ่มครั้งแรกแล้วเก็บไว้ในเบราว์เซอร์นี้ ใช้ผูก 1 บัญชี = 1 มือถือ */
+function deviceId() {
+  var k = 'tesr-tc-dev', v = A.store.get(k);
+  if (!v) { var m = document.cookie.match(/(?:^|; )tesrdev=([A-Za-z0-9-]+)/); v = m && m[1]; }
+  if (!v || v.length < 12) {
+    var a = new Uint8Array(12); (window.crypto || window.msCrypto).getRandomValues(a);
+    v = 'D' + Array.prototype.map.call(a, function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+  }
+  A.store.set(k, v); try { document.cookie = 'tesrdev=' + v + '; max-age=' + 60 * 60 * 24 * 400 + '; path=/; SameSite=Lax; Secure'; } catch (e) {}
+  return v;
+}
+
+/* ================= punch: 1) QR 2) GPS 3) เซลฟี่ 4) บันทึกอัตโนมัติ ================= */
 function openPunch(kind, presetToken) {
-  var token = presetToken || '', pos = null, stopCam = null, src = 'sim-in', S = ME.settings, sent = false;
+  var token = presetToken || '', pos = null, stopCam = null, src = 'sim-in', S = ME.settings, sent = false, needSelfie = S.selfie !== false, selfie = '', selfieOn = false;
   A.sound.unlock();
-  var m = A.modal('<div class="viewfinder"><video id="vid" muted playsinline hidden></video><div class="frame"><i></i><i></i><i></i><i></i><div class="laser"></div></div><div class="cap" id="vcap">เล็ง QR Code ที่ติดหน้าออฟฟิศ</div><div class="vf-done" id="vdone" hidden></div></div>' +
-    '<div class="sheet-b" style="padding-top:14px"><div class="steps"><div class="step" id="sq"><span class="sd"></span><div id="sq-t">รอสแกน QR Code</div></div><div class="step" id="sg"><span class="sd"></span><div id="sg-t">กำลังหาตำแหน่ง…</div></div></div>' +
-    (A.REMOTE ? '' : '<details open><summary class="small muted" style="cursor:pointer">โหมดทดลอง</summary><div class="row" style="margin-top:8px"><div class="field"><label for="src">ตำแหน่งมือถือ</label><select id="src"><option value="sim-in">จำลอง: อยู่ในออฟฟิศ</option><option value="sim-out">จำลอง: นอกพื้นที่ ~3 กม.</option><option value="gps">GPS จริงของเครื่อง</option></select></div></div><button class="btn ghost sm" id="fake" style="margin-top:8px">จำลองการสแกน QR</button></details>') +
+  var m = A.modal('<div class="viewfinder"><video id="vid" muted playsinline hidden></video><div class="frame" id="qframe"><i></i><i></i><i></i><i></i><div class="laser"></div></div><div class="oval" id="oval" hidden></div><div class="cap" id="vcap">เล็ง QR Code ที่ติดหน้าออฟฟิศ</div><button class="shutter" id="shot" hidden aria-label="ถ่ายเซลฟี่"></button><div class="vf-done" id="vdone" hidden></div></div>' +
+    '<div class="sheet-b" style="padding-top:14px"><div class="steps"><div class="step" id="sq"><span class="sd"></span><div id="sq-t">รอสแกน QR Code</div></div><div class="step" id="sg"><span class="sd"></span><div id="sg-t">กำลังหาตำแหน่ง…</div></div>' +
+    (needSelfie ? '<div class="step" id="ss"><span class="sd"></span><div id="ss-t">ถ่ายเซลฟี่ยืนยันตัวตน</div></div>' : '') + '</div>' +
+    (A.REMOTE ? '' : '<details open><summary class="small muted" style="cursor:pointer">โหมดทดลอง</summary><div class="row" style="margin-top:8px"><div class="field"><label for="src">ตำแหน่งมือถือ</label><select id="src"><option value="sim-in">จำลอง: อยู่ในออฟฟิศ</option><option value="sim-out">จำลอง: นอกพื้นที่ ~3 กม.</option><option value="gps">GPS จริงของเครื่อง</option></select></div></div><div class="hrow" style="gap:8px;margin-top:8px;flex-wrap:wrap"><button class="btn ghost sm" id="fake">จำลองการสแกน QR</button>' + (needSelfie ? '<button class="btn ghost sm" id="fakeself">จำลองเซลฟี่</button>' : '') + '</div></details>') +
     '<div id="res"></div><div class="row"><button class="btn ghost" id="cl">ยกเลิก</button><button class="btn ' + (kind === 'in' ? 'primary' : 'gold') + '" id="go" disabled>ยืนยัน' + (kind === 'in' ? 'เช็คอิน' : 'เช็คเอาท์') + '</button></div></div>');
   var $ = function (id) { return document.getElementById(id); };
-  var step = function (id, cls, html) { $(id).className = 'step ' + (cls || ''); $(id + '-t').innerHTML = html; };
+  var step = function (id, cls, html) { if (!$(id)) return; $(id).className = 'step ' + (cls || ''); $(id + '-t').innerHTML = html; };
   var CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
   var CROSS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
   var WAIT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="9" opacity=".25"/><path d="M12 3a9 9 0 019 9"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.9s" repeatCount="indefinite"/></path></svg>';
   var vf = function (cls, icon, title, sub) { var d = $('vdone'); if (!d) return; d.hidden = false; d.className = 'vf-done ' + cls; d.innerHTML = '<div class="ic">' + icon + '</div><b>' + title + '</b>' + (sub ? '<span>' + sub + '</span>' : ''); };
+  var vfHide = function () { var d = $('vdone'); if (d) d.hidden = true; };
+  var inArea = function () { return !!(pos && pos.dist <= S.radius); };
   var ready = function () {
-    var ok = !!(token && pos && pos.dist <= S.radius);
+    var ok = !!(token && inArea() && (!needSelfie || selfie));
     $('go').disabled = !ok;
-    if (ok && !sent) submit();
-    else if (token && !sent && !pos) vf('ok', CHECK, 'สแกน QR สำเร็จ', 'กำลังตรวจตำแหน่ง…');
-    else if (token && !sent && pos && !ok && pos.warned !== true) { pos.warned = true; A.sound.bad(); vf('bad', CROSS, 'อยู่นอกพื้นที่', 'ห่างออฟฟิศ ' + TC.util.fmtDist(pos.dist) + ' · ลงเวลาไม่ได้'); }
+    if (ok && !sent) return submit();
+    if (sent || !token) return;
+    if (!pos) vf('ok', CHECK, 'สแกน QR สำเร็จ', 'กำลังตรวจตำแหน่ง…');
+    else if (!inArea()) { if (!pos.warned) { pos.warned = true; A.sound.bad(); vf('bad', CROSS, 'อยู่นอกพื้นที่', 'ห่างออฟฟิศ ' + TC.util.fmtDist(pos.dist) + ' · ลงเวลาไม่ได้'); } }
+    else if (needSelfie && !selfie && !selfieOn) startSelfie();
   };
   var parse = function (t) { t = String(t || '').trim(); try { var u = new URL(t), v = u.searchParams.get('t'); if (v) return v; } catch (e) {} var p = t.split('|'); return p.length >= 3 ? p[2] : t; };
-  var got = function (t) { token = parse(t); if (stopCam) { stopCam(); stopCam = null; } $('vid').hidden = true; A.sound.scan(); vf('ok', CHECK, 'สแกน QR สำเร็จ', pos ? '' : 'กำลังตรวจตำแหน่ง…'); step('sq', 'ok', '<b>อ่าน QR แล้ว</b>'); $('vcap').textContent = ''; ready(); };
+  var stopVideo = function () { if (stopCam) { stopCam(); stopCam = null; } var v = $('vid'); if (v) { v.hidden = true; v.classList.remove('mirror'); } };
+  var got = function (t) { token = parse(t); stopVideo(); $('qframe').hidden = true; A.sound.scan(); vf('ok', CHECK, 'สแกน QR สำเร็จ', pos ? '' : 'กำลังตรวจตำแหน่ง…'); step('sq', 'ok', '<b>อ่าน QR แล้ว</b>'); $('vcap').textContent = ''; ready(); };
   var show = function () {
     var d = TC.util.haversine(pos.lat, pos.lng, S.lat, S.lng), ok = d <= S.radius; pos.dist = d;
     step('sg', ok ? 'ok' : 'bad', '<b>' + (ok ? 'อยู่ในพื้นที่' : 'อยู่นอกพื้นที่') + '</b> · ห่างออฟฟิศ <span class="num">' + TC.util.fmtDist(d) + '</span><br><small>อนุญาตไม่เกิน ' + TC.util.fmtDist(S.radius) + ' · ' + pos.label + '</small>'); ready();
@@ -333,15 +351,21 @@ function openPunch(kind, presetToken) {
     else if (src === 'sim-out') { pos = { lat: S.lat + 0.022, lng: S.lng + 0.02, label: 'ตำแหน่งจำลอง' }; show(); }
     else gps();
   };
-  var camera = function () {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.jsQR) { $('vcap').textContent = 'เปิดกล้องไม่ได้ · สแกน QR ด้วยกล้องมือถือแทนได้'; return; }
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false }).then(function (stream) {
+  var openCam = function (facing, onStream, onFail) {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return onFail();
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 960 } }, audio: false }).then(function (stream) {
       var v = $('vid'); if (!v) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
       v.srcObject = stream; v.hidden = false; v.play();
-      var c = document.createElement('canvas'), ctx = c.getContext('2d', { willReadFrequently: true }), stop = false;
-      stopCam = function () { stop = true; stream.getTracks().forEach(function (t) { t.stop(); }); };
+      stopCam = function () { stream.getTracks().forEach(function (t) { t.stop(); }); };
+      onStream(v);
+    }).catch(onFail);
+  };
+  var camera = function () {
+    if (!window.jsQR) { $('vcap').textContent = 'เปิดกล้องไม่ได้ · สแกน QR ด้วยกล้องมือถือแทนได้'; return; }
+    openCam('environment', function (v) {
+      var c = document.createElement('canvas'), ctx = c.getContext('2d', { willReadFrequently: true }), mine = stopCam;
       (function tick() {
-        if (stop) return;
+        if (stopCam !== mine || token) return;
         if (v.readyState >= 2 && v.videoWidth) {
           var k = Math.min(1, 640 / v.videoWidth); c.width = v.videoWidth * k | 0; c.height = v.videoHeight * k | 0;
           ctx.drawImage(v, 0, 0, c.width, c.height);
@@ -350,28 +374,64 @@ function openPunch(kind, presetToken) {
         }
         requestAnimationFrame(tick);
       })();
-    }).catch(function () { $('vcap').textContent = A.REMOTE ? 'ไม่ได้รับสิทธิ์กล้อง · อนุญาตกล้องแล้วลองใหม่' : 'กล้องใช้ไม่ได้ในหน้านี้ · กด "จำลองการสแกน QR"'; });
+    }, function () { $('vcap').textContent = A.REMOTE ? 'ไม่ได้รับสิทธิ์กล้อง · อนุญาตกล้องแล้วลองใหม่' : 'กล้องใช้ไม่ได้ในหน้านี้ · กด "จำลองการสแกน QR"'; });
   };
-  m._onclose = function () { if (stopCam) stopCam(); };
+  /* เซลฟี่: ใช้กล้องหน้าถ่ายสดเท่านั้น (เลือกรูปจากอัลบั้มไม่ได้) */
+  var tookSelfie = function (url) {
+    selfie = url; selfieOn = false; stopVideo();
+    $('shot').hidden = true; $('oval').hidden = true; $('vcap').textContent = '';
+    A.sound.scan(); step('ss', 'ok', '<b>ถ่ายเซลฟี่แล้ว</b>'); vf('ok', '<img class="selfie-thumb" src="' + url + '" alt="">', 'ถ่ายรูปแล้ว', 'กำลังบันทึกเวลา…'); ready();
+  };
+  var startSelfie = function () {
+    selfieOn = true; stopVideo(); vfHide();
+    step('ss', '', '<b>ถ่ายเซลฟี่</b> · หันหน้าเข้ากล้องให้เห็นหน้าชัด แล้วกดปุ่มถ่าย');
+    $('vcap').textContent = 'ให้ใบหน้าอยู่ในกรอบ แล้วกดปุ่มถ่าย';
+    openCam('user', function (v) {
+      v.classList.add('mirror'); $('oval').hidden = false; $('shot').hidden = false;
+      $('shot').onclick = function () {
+        if (!v.videoWidth) return;
+        var w = 360, h = Math.round(w * v.videoHeight / v.videoWidth), c = document.createElement('canvas'); c.width = w; c.height = h;
+        var ctx = c.getContext('2d'); ctx.translate(w, 0); ctx.scale(-1, 1); ctx.drawImage(v, 0, 0, w, h);
+        tookSelfie(c.toDataURL('image/jpeg', 0.72));
+      };
+    }, function () {
+      selfieOn = false; A.sound.bad();
+      vf('bad', CROSS, 'เปิดกล้องหน้าไม่ได้', A.REMOTE ? 'อนุญาตให้เบราว์เซอร์ใช้กล้อง แล้วแตะที่นี่เพื่อลองใหม่' : 'โหมดทดลอง: กด "จำลองเซลฟี่"');
+      if (A.REMOTE) $('vdone').onclick = function () { $('vdone').onclick = null; startSelfie(); };
+      step('ss', 'bad', '<b>ยังไม่ได้ถ่ายเซลฟี่</b>');
+    });
+  };
+  m._onclose = function () { stopVideo(); };
   if (token) got(token); else camera();
-  if (A.REMOTE) gps(); else { locate(); $('src').onchange = function (ev) { src = ev.target.value; locate(); }; $('fake').onclick = function () { got('TESR-ATTEND|x|' + TCMock.qrToken()); }; }
+  if (A.REMOTE) gps(); else {
+    locate(); $('src').onchange = function (ev) { src = ev.target.value; locate(); };
+    $('fake').onclick = function () { got('TESR-ATTEND|x|' + TCMock.qrToken()); };
+    if ($('fakeself')) $('fakeself').onclick = function () {
+      if (!token || !inArea()) return A.toast('สแกน QR และอยู่ในพื้นที่ก่อน');
+      var c = document.createElement('canvas'); c.width = 240; c.height = 320; var x = c.getContext('2d');
+      x.fillStyle = '#c9b48a'; x.fillRect(0, 0, 240, 320); x.fillStyle = '#7a5a3a'; x.beginPath(); x.arc(120, 130, 60, 0, 7); x.fill(); x.fillRect(50, 210, 140, 110);
+      x.fillStyle = '#fff'; x.font = '16px sans-serif'; x.fillText(new Date().toLocaleTimeString('th-TH'), 70, 300);
+      tookSelfie(c.toDataURL('image/jpeg', 0.72));
+    };
+  }
   $('cl').onclick = A.closeModal;
   function submit() {
     var go = $('go'); sent = true; go.disabled = true; go.textContent = 'กำลังบันทึก…';
     vf('wait', WAIT, 'กำลังบันทึกเวลา…', '');
-    api('punch', { token2: token, lat: pos.lat, lng: pos.lng }).then(function (res) {
-      var r = res.rec, late = res.kind === 'in' && r.lateMin;
+    api('punch', { token2: token, lat: pos.lat, lng: pos.lng, selfie: selfie, dev: deviceId() }).then(function (res) {
+      var r = res.rec, late = res.kind === 'in' && r.lateMin, pic = selfie ? '<img class="selfie-thumb" src="' + selfie + '" alt="">' : CHECK;
       if (late) A.sound.warn(); else A.sound.ok();
-      vf(late ? 'warn' : 'ok', CHECK, (res.kind === 'in' ? 'เช็คอิน ' + esc(r.in) : 'เช็คเอาท์ ' + esc(r.out)) + ' น.', res.kind === 'in' ? (late ? 'มาสาย ' + A.fmtLate(r.lateMin) : 'ตรงเวลา ขอให้เป็นวันที่ดี') : 'บันทึกเวลาออกงานแล้ว');
-      $('res').innerHTML = res.kind === 'in'
+      vf(late ? 'warn' : 'ok', pic, (res.kind === 'in' ? 'เช็คอิน ' + esc(r.in) : 'เช็คเอาท์ ' + esc(r.out)) + ' น.', res.kind === 'in' ? (late ? 'มาสาย ' + A.fmtLate(r.lateMin) : 'ตรงเวลา ขอให้เป็นวันที่ดี') : 'บันทึกเวลาออกงานแล้ว');
+      $('res').innerHTML = (res.kind === 'in'
         ? '<div class="result ' + (late ? 'late' : 'ok') + '"><h3 class="num">เช็คอินสำเร็จ ' + esc(r.in) + '</h3>' + (late ? 'มาสาย ' + A.fmtLate(r.lateMin) : 'ตรงเวลา ขอให้เป็นวันที่ดี') + '</div>'
-        : '<div class="result ok"><h3 class="num">เช็คเอาท์สำเร็จ ' + esc(r.out) + '</h3>บันทึกเวลาออกงานแล้ว</div>';
+        : '<div class="result ok"><h3 class="num">เช็คเอาท์สำเร็จ ' + esc(r.out) + '</h3>บันทึกเวลาออกงานแล้ว</div>') +
+        (res.flag ? '<p class="small" style="color:var(--warn);margin-top:8px">ระบบแจ้งแอดมินแล้ว: ' + esc(res.flag) + '</p>' : '');
       go.textContent = 'เสร็จสิ้น'; go.disabled = false; go.onclick = function () { A.closeModal(); refresh(); };
     }).catch(function (e) {
       A.sound.bad(); vf('bad', CROSS, 'ลงเวลาไม่สำเร็จ', esc(e.message));
       $('res').innerHTML = '<div class="result bad"><h3>ลงเวลาไม่สำเร็จ</h3>' + esc(e.message) + '</div>';
-      go.textContent = 'ลองอีกครั้ง'; go.disabled = !(token && pos && pos.dist <= S.radius);
-      go.onclick = function () { A.sound.unlock(); submit(); };
+      go.textContent = 'ลองอีกครั้ง'; go.disabled = !(token && inArea());
+      go.onclick = function () { A.sound.unlock(); if (e.code === 'SELFIE') { sent = false; selfie = ''; startSelfie(); } else submit(); };
     });
   }
   $('go').onclick = function () { A.sound.unlock(); submit(); };
