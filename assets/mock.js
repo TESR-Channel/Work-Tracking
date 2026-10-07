@@ -84,6 +84,8 @@ var TCMock = (function () {
     cachePut: function (k, v) { cache[k] = v; },
     lock: function (fn) { return fn(); },
     savePhoto: function (e, mime, b64, dataUrl) { return dataUrl; },
+    saveSelfie: function (e, date, kind, b64, dataUrl) { var id = 'S' + Math.random().toString(36).slice(2, 10); try { localStorage.setItem('tesr-tc-selfie-' + id, dataUrl); } catch (x) {} return id; },
+    getSelfie: function (id) { try { return localStorage.getItem('tesr-tc-selfie-' + id) || ''; } catch (x) { return ''; } },
     buildMonthSheet: null
   };
   return {
