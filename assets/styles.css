@@ -296,3 +296,7 @@ td.num,td.mono,td.r{white-space:nowrap}
 .logo.lg{width:64px;height:64px}
 .emp-top .logo{width:34px;height:34px}
 .side .brand .logo{width:46px;height:46px}
+
+.sched td,.sched th{padding:6px 10px}
+.sched input[type=checkbox]{width:18px;height:18px;accent-color:var(--crimson)}
+.sched .inline-edit input{width:110px}

@@ -25,7 +25,7 @@ var A = APP, esc = A.esc, TOKEN = 'tesr-tc-admin';
 var api = A.makeApi(TOKEN, function () { logout('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่'); });
 var root = document.getElementById('app');
 var INFO = null, page = 'today', pendingN = 0;
-var st = { month: null, calMonth: null, reqFilter: 'pending', reqKind: 'all', selEmp: null, editDay: null, showInactive: false, holYear: null };
+var st = { onlyAlerts: false, month: null, calMonth: null, reqFilter: 'pending', reqKind: 'all', selEmp: null, editDay: null, showInactive: false, holYear: null };
 try { var h = location.hash.replace('#', ''); if (/^(today|req|cal|report|emps|hol|set)$/.test(h)) page = h; } catch (e) {}
 
 /* ================= login ================= */
@@ -213,39 +213,71 @@ function pCal(el, banner) {
 
 /* ================= รายงานรายเดือน ================= */
 var LT = function () { return Object.keys(TC.LEAVE_TYPES); };
+function pct(v) { if (v === null || v === undefined) return '<span class="muted">–</span>'; var c = v >= 95 ? 'ok' : v >= 85 ? 'late' : 'bad'; return '<span class="pill ' + c + ' num">' + v + '%</span>'; }
+function flagChips(x) {
+  var o = '';
+  (x.flags || []).forEach(function (f) {
+    if (f === 'late') o += A.pill('late', 'สาย ' + x.late + ' น.') + ' ';
+    if (f === 'early') o += A.pill('late', 'ออกก่อน ' + x.early + ' น.') + ' ';
+    if (f === 'noOut') o += A.pill('bad', 'ลืมเช็คเอาท์') + ' ';
+    if (f === 'absent') o += A.pill('bad', 'ขาด') + ' ';
+  });
+  return o;
+}
+function sumChips(t) {
+  var o = '';
+  if (t.lateDays) o += A.pill('late', 'สาย ' + t.lateDays) + ' ';
+  if (t.earlyDays) o += A.pill('late', 'ออกก่อน ' + t.earlyDays) + ' ';
+  if (t.noOut) o += A.pill('bad', 'ลืมเช็คเอาท์ ' + t.noOut) + ' ';
+  if (t.absent) o += A.pill('bad', 'ขาด ' + A.fmtDays(t.absent)) + ' ';
+  return o || A.pill('ok', 'ปกติ');
+}
+function leaveBrief(t) { return LT().filter(function (k) { return t.leave[k]; }).map(function (k) { return TC.LEAVE_TYPES[k].replace('ลา', '') + ' ' + A.fmtDays(t.leave[k]); }).join(' · '); }
 function pReport(el, banner) {
   return api('adminMonth', { month: st.month }).then(function (d) {
-    var rep = d.report, max = Math.max.apply(null, [1].concat(rep.map(function (r) { return r.t.lateMin; })));
+    var rep = d.report;
     if (!rep.some(function (r) { return r.emp.id === st.selEmp; })) st.selEmp = rep[0] && rep[0].emp.id;
     var sel = rep.filter(function (r) { return r.emp.id === st.selEmp; })[0];
-    var tot = { present: 0, lateMin: 0, absent: 0, leave: 0 };
-    rep.forEach(function (r) { tot.present += r.t.present; tot.lateMin += r.t.lateMin; tot.absent += r.t.absent; tot.leave += r.t.leaveDays; });
-    el.innerHTML = banner + head('รายงานรายเดือน', 'สรุปสำหรับทำเงินเดือน · นับถึงวันนี้ · นับสายตามเวลางานของแต่ละคน · ลาครึ่งวันเช้าที่อนุมัติแล้วไม่นับสาย',
+    var tot = { present: 0, lateMin: 0, early: 0, absent: 0, leave: 0, alerts: 0 };
+    rep.forEach(function (r) { tot.present += r.t.present; tot.lateMin += r.t.lateMin; tot.early += r.t.earlyMin; tot.absent += r.t.absent; tot.leave += r.t.leaveDays; tot.alerts += r.t.alerts; });
+    var small = function (t) { return ' <small class="muted" style="font-size:14px">' + t + '</small>'; };
+    var days = sel ? sel.days.filter(function (x) { return x.date <= d.today && (x.work || x.rec || x.leave); }).filter(function (x) { return !st.onlyAlerts || x.flags.length; }) : [];
+    el.innerHTML = banner + head('รายงานรายเดือน', 'สำหรับทำเงินเดือนและ KPI · นับถึงวันนี้ · สาย/ออกก่อนเทียบกับเวลางานของแต่ละคนในแต่ละวัน · ลาครึ่งวันที่อนุมัติแล้วไม่นับสาย/ออกก่อนในช่วงที่ลา',
       '<div class="toolbar"><div class="field"><label for="rm">เดือน</label>' + monthSel('rm', st.month) + '</div>' +
       (A.REMOTE ? '<button class="btn primary sm" id="bs">อัปเดตชีตสรุปใน Google Sheets</button>' : '') +
       '<button class="btn gold sm" id="xs">Export สรุป (CSV)</button><button class="btn ghost sm" id="xd">Export รายวัน (CSV)</button></div>') +
       '<div id="bsout"></div>' +
-      '<div class="kpis k4 num"><div class="card kpi k-ok"><span>มาทำงานรวม (คน-วัน)</span><b>' + tot.present + '</b></div><div class="card kpi k-late"><span>สายรวมทั้งทีม</span><b>' + tot.lateMin + ' <small class="muted" style="font-size:14px">นาที</small></b></div>' +
-      '<div class="card kpi k-bad"><span>ขาดงานรวม</span><b>' + A.fmtDays(tot.absent) + ' <small class="muted" style="font-size:14px">วัน</small></b></div><div class="card kpi k-leave"><span>ลารวม (อนุมัติแล้ว)</span><b>' + A.fmtDays(tot.leave) + ' <small class="muted" style="font-size:14px">วัน</small></b></div></div>' +
-      '<div class="card tbl-wrap"><table><thead><tr><th>พนักงาน</th><th class="r">วันทำงาน</th><th class="r">มา</th><th class="r">ขาด</th><th class="r">สาย (ครั้ง)</th><th>สายรวม</th>' +
-      LT().map(function (t) { return '<th class="r">' + TC.LEAVE_TYPES[t] + '</th>'; }).join('') + '<th class="r">ลืมเช็คเอาท์</th><th class="r">ชม.ในออฟฟิศ</th></tr></thead><tbody>' +
+      '<div class="kpis num"><div class="card kpi k-req"><span>รายการต้องตรวจสอบ</span><b>' + tot.alerts + small('รายการ') + '</b></div>' +
+      '<div class="card kpi k-late"><span>สายรวมทั้งทีม</span><b>' + tot.lateMin + small('นาที') + '</b></div>' +
+      '<div class="card kpi k-late"><span>ออกก่อนเวลารวม</span><b>' + tot.early + small('นาที') + '</b></div>' +
+      '<div class="card kpi k-bad"><span>ขาดงานรวม</span><b>' + A.fmtDays(tot.absent) + small('วัน') + '</b></div>' +
+      '<div class="card kpi k-leave"><span>ลารวม (อนุมัติแล้ว)</span><b>' + A.fmtDays(tot.leave) + small('วัน') + '</b></div></div>' +
+      '<div class="card tbl-wrap"><table><thead><tr><th>พนักงาน</th><th>แจ้งเตือน</th><th class="r">วันทำงาน</th><th class="r">มา</th><th class="r">ขาด</th><th class="r">สาย</th><th class="r">ออกก่อน</th><th class="r">ลืมเช็คเอาท์</th><th>ลา (วัน)</th><th class="r">ชม.</th><th class="c">ตรงเวลา</th><th class="c">มาทำงาน</th></tr></thead><tbody>' +
       (rep.map(function (r) {
         var t = r.t;
-        return '<tr class="click' + (r.emp.id === st.selEmp ? ' sel' : '') + '" data-emp="' + r.emp.id + '"><td>' + A.person(r.emp) + '</td><td class="r num">' + t.workdays + '</td><td class="r num">' + t.present + '</td>' +
-          '<td class="r num" style="color:' + (t.absent ? 'var(--bad)' : 'inherit') + ';font-weight:' + (t.absent ? 600 : 400) + '">' + A.fmtDays(t.absent) + '</td><td class="r num">' + t.lateDays + '</td>' +
-          '<td><div style="display:flex;align-items:center;gap:8px"><span class="num" style="min-width:62px;font-weight:600;color:' + (t.lateMin ? 'var(--warn)' : 'var(--muted)') + '">' + t.lateMin + ' นาที</span><div class="bar" style="flex:1"><i style="width:' + (t.lateMin / max * 100) + '%"></i></div></div></td>' +
-          LT().map(function (k) { return '<td class="r num">' + (t.leave[k] ? A.fmtDays(t.leave[k]) : '<span class="muted">–</span>') + '</td>'; }).join('') +
-          '<td class="r num" style="color:' + (t.noOut ? 'var(--bad)' : 'inherit') + '">' + t.noOut + '</td><td class="r num">' + t.hours.toFixed(1) + '</td></tr>';
-      }).join('') || '<tr><td colspan="13" class="empty">ไม่มีข้อมูลเดือนนี้</td></tr>') + '</tbody></table></div>' +
-      (sel ? '<div class="card"><div class="panel-h"><div>' + A.person(sel.emp) + '</div><span class="small muted">รายวัน · กด "แก้ไข" เพื่อแก้เวลาเข้า–ออกด้วยตนเอง</span></div><div class="tbl-wrap"><table><thead><tr><th>วันที่</th><th>สถานะ</th><th class="r">เข้างาน</th><th class="r">ออกงาน</th><th class="r">สาย (นาที)</th><th>การลา / หมายเหตุ</th><th class="r"></th></tr></thead><tbody>' +
-        sel.days.filter(function (x) { return x.date <= d.today && (x.work || x.rec || x.leave); }).map(function (x) {
+        return '<tr class="click' + (r.emp.id === st.selEmp ? ' sel' : '') + '" data-emp="' + r.emp.id + '"><td>' + A.person(r.emp) + '</td><td style="white-space:normal;min-width:150px">' + sumChips(t) + '</td>' +
+          '<td class="r num">' + t.workdays + '</td><td class="r num">' + t.present + '</td>' +
+          '<td class="r num" style="color:' + (t.absent ? 'var(--bad)' : 'inherit') + '">' + A.fmtDays(t.absent) + '</td>' +
+          '<td class="r num">' + (t.lateDays ? '<b style="color:var(--warn)">' + t.lateDays + '</b> <span class="muted small">/ ' + t.lateMin + ' น.</span>' : '<span class="muted">0</span>') + '</td>' +
+          '<td class="r num">' + (t.earlyDays ? '<b style="color:var(--warn)">' + t.earlyDays + '</b> <span class="muted small">/ ' + t.earlyMin + ' น.</span>' : '<span class="muted">0</span>') + '</td>' +
+          '<td class="r num" style="color:' + (t.noOut ? 'var(--bad)' : 'inherit') + '">' + t.noOut + '</td>' +
+          '<td class="small">' + (t.leaveDays ? '<b>' + A.fmtDays(t.leaveDays) + '</b> <span class="muted">' + esc(leaveBrief(t)) + '</span>' : '<span class="muted">–</span>') + '</td>' +
+          '<td class="r num">' + t.hours.toFixed(1) + '</td><td class="c">' + pct(t.onTimeRate) + '</td><td class="c">' + pct(t.attendRate) + '</td></tr>';
+      }).join('') || '<tr><td colspan="12" class="empty">ไม่มีข้อมูลเดือนนี้</td></tr>') + '</tbody></table></div>' +
+      '<p class="small muted">ตรงเวลา = วันที่ไม่สาย ÷ วันที่มา · มาทำงาน = วันทำงานที่ไม่ขาด ÷ (วันทำงาน − วันลาที่อนุมัติ) · ใช้เป็นตัวชี้วัด KPI ได้</p>' +
+      (sel ? '<div class="card"><div class="panel-h"><div>' + A.person(sel.emp, sel.emp.code + ' · ' + TC.util.scheduleText(sel.emp, d.settings)) + '</div>' +
+        '<label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="oa"' + (st.onlyAlerts ? ' checked' : '') + '> เฉพาะวันที่มีแจ้งเตือน</label></div>' +
+        '<div class="tbl-wrap"><table><thead><tr><th>วันที่</th><th>เวลางาน</th><th>สถานะ</th><th class="r">เข้างาน</th><th class="r">ออกงาน</th><th>แจ้งเตือน</th><th>การลา / หมายเหตุ</th><th class="r"></th></tr></thead><tbody>' +
+        (days.map(function (x) {
           var editing = st.editDay === x.date, r = x.rec;
           var note = [x.leave ? A.leaveLabel(x.leave) + (x.leave.status !== 'approved' ? ' (รออนุมัติ)' : '') : '', r && r.note ? r.note : '', x.holiday].filter(String).join(' · ');
-          return '<tr><td class="num">' + A.thDate(x.date) + '</td><td>' + A.stPill(x.st) + '</td>' +
+          var shift = x.shift ? '<span class="mono small">' + esc(x.shift.start) + '–' + esc(x.shift.end) + '</span>' : '<span class="muted small">วันหยุด</span>';
+          return '<tr><td class="num">' + A.thDate(x.date) + '</td><td>' + shift + '</td><td>' + A.stPill(x.st) + '</td>' +
             (editing ? '<td class="r inline-edit"><input type="time" id="ei" value="' + esc(r ? r.in : '') + '"></td><td class="r inline-edit"><input type="time" id="eo" value="' + esc(r ? r.out : '') + '"></td><td></td><td class="inline-edit"><input id="en" style="width:100%" placeholder="เหตุผลที่แก้" value=""></td><td class="r" style="white-space:nowrap"><button class="btn ok sm" id="es">บันทึก</button> <button class="btn ghost sm" id="ex">ยกเลิก</button></td>'
-              : '<td class="r mono">' + (r ? esc(r.in) : '—') + '</td><td class="r mono">' + (r ? esc(r.out || (x.date < d.today ? '—' : '')) : '—') + (r && !r.out && x.date < d.today ? ' ' + A.pill('bad', 'ลืม') : '') + '</td><td class="r num">' + (x.late || (r ? 0 : '—')) + '</td><td class="small">' + esc(note) + '</td><td class="r"><button class="btn ghost sm" data-edit="' + x.date + '">แก้ไข</button></td>') + '</tr>';
-        }).join('') + '</tbody></table></div></div>' : '');
+              : '<td class="r mono">' + (r ? esc(r.in) : '—') + '</td><td class="r mono">' + (r && r.out ? esc(r.out) : '—') + '</td><td style="white-space:normal">' + flagChips(x) + '</td><td class="small">' + esc(note) + '</td><td class="r"><button class="btn ghost sm" data-edit="' + x.date + '">แก้ไข</button></td>') + '</tr>';
+        }).join('') || '<tr><td colspan="8" class="empty">' + (st.onlyAlerts ? 'ไม่มีวันที่มีแจ้งเตือน' : 'ยังไม่มีวันทำงานในเดือนนี้') + '</td></tr>') + '</tbody></table></div></div>' : '');
     document.getElementById('rm').onchange = function (ev) { st.month = ev.target.value; st.editDay = null; go('report'); };
+    var oa = document.getElementById('oa'); if (oa) oa.onchange = function () { st.onlyAlerts = oa.checked; go('report'); };
     el.querySelectorAll('[data-emp]').forEach(function (tr) { tr.onclick = function () { st.selEmp = tr.dataset.emp; st.editDay = null; go('report'); }; });
     el.querySelectorAll('[data-edit]').forEach(function (b) { b.onclick = function () { st.editDay = b.dataset.edit; go('report'); }; });
     var ex = document.getElementById('ex'); if (ex) ex.onclick = function () { st.editDay = null; go('report'); };
@@ -264,14 +296,15 @@ function pReport(el, banner) {
       A.modal('<div class="sheet-h"><h3>' + esc(name) + '</h3><button class="x" data-close aria-label="ปิด">×</button></div><div class="sheet-b"><p class="small muted">ไฟล์ดาวน์โหลดแล้ว ถ้าไม่ขึ้น คัดลอกข้อความนี้ไปวางใน Excel / Google Sheets ได้</p><textarea class="csv" id="csvt" readonly>' + esc(text) + '</textarea><button class="btn ghost" id="cp">คัดลอก</button></div>', 'wide');
       document.getElementById('cp').onclick = function () { var t = document.getElementById('csvt'); (navigator.clipboard ? navigator.clipboard.writeText(t.value) : Promise.reject()).then(function () { A.toast('คัดลอกแล้ว'); }, function () { t.select(); A.toast('เลือกข้อความแล้ว กด Ctrl+C'); }); };
     };
+    var FL = { late: 'สาย', early: 'ออกก่อนเวลา', noOut: 'ลืมเช็คเอาท์', absent: 'ขาด' };
     document.getElementById('xs').onclick = function () {
-      show('TESR-summary-' + st.month + '.csv', A.csv([['รหัส', 'ชื่อ', 'ตำแหน่ง', 'วันทำงาน', 'มาทำงาน', 'ขาด(วัน)', 'มาสาย(ครั้ง)', 'สายรวม(นาที)'].concat(LT().map(function (t) { return TC.LEAVE_TYPES[t] + '(วัน)'; })).concat(['ลืมเช็คเอาท์', 'ชั่วโมงในออฟฟิศ'])]
-        .concat(rep.map(function (r) { var t = r.t; return [r.emp.code, r.emp.name, r.emp.position, t.workdays, t.present, t.absent, t.lateDays, t.lateMin].concat(LT().map(function (k) { return t.leave[k]; })).concat([t.noOut, t.hours]); }))));
+      show('TESR-summary-' + st.month + '.csv', A.csv([['รหัส', 'ชื่อ', 'ตำแหน่ง', 'เวลางาน', 'วันทำงาน', 'มาทำงาน', 'ขาด(วัน)', 'มาสาย(ครั้ง)', 'สายรวม(นาที)', 'ออกก่อน(ครั้ง)', 'ออกก่อนรวม(นาที)', 'ลืมเช็คเอาท์'].concat(LT().map(function (t) { return TC.LEAVE_TYPES[t] + '(วัน)'; })).concat(['ชั่วโมงในออฟฟิศ', 'ตรงเวลา(%)', 'มาทำงาน(%)', 'รายการแจ้งเตือน'])]
+        .concat(rep.map(function (r) { var t = r.t; return [r.emp.code, r.emp.name, r.emp.position, TC.util.scheduleText(r.emp, d.settings), t.workdays, t.present, t.absent, t.lateDays, t.lateMin, t.earlyDays, t.earlyMin, t.noOut].concat(LT().map(function (k) { return t.leave[k]; })).concat([t.hours, t.onTimeRate === null ? '' : t.onTimeRate, t.attendRate === null ? '' : t.attendRate, t.alerts]); }))));
     };
     document.getElementById('xd').onclick = function () {
-      var lines = [['วันที่', 'รหัส', 'ชื่อ', 'สถานะ', 'เข้างาน', 'ออกงาน', 'สาย(นาที)', 'การลา', 'หมายเหตุ']];
+      var lines = [['วันที่', 'รหัส', 'ชื่อ', 'เวลางาน', 'สถานะ', 'เข้างาน', 'ออกงาน', 'สาย(นาที)', 'ออกก่อน(นาที)', 'แจ้งเตือน', 'การลา', 'หมายเหตุ']];
       rep.forEach(function (r) { r.days.forEach(function (x) { if (x.date > d.today || !(x.work || x.rec || x.leave)) return;
-        lines.push([x.date, r.emp.code, r.emp.name, A.ST[x.st][1], x.rec ? x.rec.in : '', x.rec ? x.rec.out : '', x.rec ? x.late : '', x.leave ? A.leaveLabel(x.leave) + (x.leave.status !== 'approved' ? ' (รออนุมัติ)' : '') : '', (x.rec && x.rec.note) || x.holiday]); }); });
+        lines.push([x.date, r.emp.code, r.emp.name, x.shift ? x.shift.start + '-' + x.shift.end : '', A.ST[x.st][1], x.rec ? x.rec.in : '', x.rec ? x.rec.out : '', x.rec ? x.late : '', x.rec ? x.early : '', x.flags.map(function (f) { return FL[f]; }).join(', '), x.leave ? A.leaveLabel(x.leave) + (x.leave.status !== 'approved' ? ' (รออนุมัติ)' : '') : '', (x.rec && x.rec.note) || x.holiday]); }); });
       show('TESR-daily-' + st.month + '.csv', A.csv(lines));
     };
   });
@@ -312,6 +345,30 @@ function pEmps(el, banner) {
     el.querySelectorAll('[data-restore]').forEach(function (b) { b.onclick = function () { api('restoreEmp', { id: b.dataset.restore }).then(function () { A.toast('เปิดใช้งานแล้ว'); go('emps'); }).catch(function (e) { A.toast(e.message); }); }; });
   });
 }
+/** ตารางเวลางานรายสัปดาห์ของพนักงาน: ติ๊กวันทำงาน และใส่เวลาเฉพาะวันที่ต่างจากเวลาปกติ */
+function scheduleEditor(e) {
+  var S = INFO.settings, cur = TC.util.parseDays(e.workdays) || S.workdays, dt = TC.util.parseDayTimes(e.dayTimes);
+  if (e.satStart || e.satEnd) dt[6] = dt[6] || { start: e.satStart || e.shiftStart || S.start, end: e.satEnd || e.shiftEnd || S.end };
+  var f = function (id, label, val, ph) { return '<div class="field"><label for="' + id + '">' + label + '</label><input id="' + id + '" type="time" value="' + esc(val || '') + '"></div>'; };
+  return '<div class="field"><span class="lbl">เวลางานปกติของคนนี้ · เว้นว่าง = ใช้เวลางานบริษัท ' + esc(S.start) + '–' + esc(S.end) + '</span><div class="row">' + f('fs1', 'เข้างาน', e.shiftStart) + f('fs2', 'เลิกงาน', e.shiftEnd) + '</div></div>' +
+    '<div class="field"><span class="lbl">ตารางรายสัปดาห์ · ติ๊กวันที่ทำงาน · ใส่เวลาเฉพาะวันที่ต่างจากปกติ (เช่น พุธ เลิก 12:20)</span><div class="card tbl-wrap"><table class="sched"><thead><tr><th>วัน</th><th class="c">ทำงาน</th><th>เข้างาน</th><th>เลิกงาน</th></tr></thead><tbody>' +
+    [1, 2, 3, 4, 5, 6, 0].map(function (d) {
+      var o = dt[d] || {};
+      return '<tr><td><b>' + A.TH_DF[d] + '</b></td><td class="c"><input type="checkbox" data-wd="' + d + '"' + (cur.indexOf(d) >= 0 ? ' checked' : '') + ' aria-label="ทำงานวัน' + A.TH_DF[d] + '"></td>' +
+        '<td class="inline-edit"><input type="time" data-ds="' + d + '" value="' + esc(o.start || '') + '" aria-label="เข้างานวัน' + A.TH_DF[d] + '"></td><td class="inline-edit"><input type="time" data-de="' + d + '" value="' + esc(o.end || '') + '" aria-label="เลิกงานวัน' + A.TH_DF[d] + '"></td></tr>';
+    }).join('') + '</tbody></table></div><span class="small muted">ช่องเวลาว่าง = ใช้เวลางานปกติของคนนี้</span></div>';
+}
+function readSchedule() {
+  var S = INFO.settings, days = [], parts = [];
+  var base = { start: document.getElementById('fs1').value || S.start, end: document.getElementById('fs2').value || S.end };
+  document.querySelectorAll('[data-wd]').forEach(function (c) {
+    var d = +c.dataset.wd; if (!c.checked) return; days.push(d);
+    var a = document.querySelector('[data-ds="' + d + '"]').value, b = document.querySelector('[data-de="' + d + '"]').value;
+    if ((a && a !== base.start) || (b && b !== base.end)) parts.push(d + '=' + (a || base.start) + '-' + (b || base.end));
+  });
+  days.sort();
+  return { workdays: days.join(',') === S.workdays.slice().sort().join(',') ? '' : days.join(','), dayTimes: parts.join(';') };
+}
 function empForm(e) {
   e = e || {};
   var f = function (id, label, val, attr) { return '<div class="field"><label for="' + id + '">' + label + '</label><input id="' + id + '" value="' + esc(val || '') + '" ' + (attr || '') + '></div>'; };
@@ -319,10 +376,7 @@ function empForm(e) {
     '<div class="row">' + f('fc', 'รหัสพนักงาน', e.code, 'required') + f('fn', 'ชื่อ–นามสกุล', e.name, 'required') + '</div>' +
     '<div class="row"><div class="field"><label for="fg">เพศ</label><select id="fg"><option value="">—</option><option value="Male"' + (e.gender === 'Male' ? ' selected' : '') + '>ชาย</option><option value="Female"' + (e.gender === 'Female' ? ' selected' : '') + '>หญิง</option></select></div>' + f('fp', 'ตำแหน่ง', e.position) + '</div>' +
     '<div class="row">' + f('fe', 'อีเมล (ใช้เป็นชื่อผู้ใช้)', e.email, 'type="email" required') + f('fph', 'เบอร์โทร (รหัสผ่านเริ่มต้น)', e.phone, 'type="tel" required') + '</div>' +
-    '<div class="field"><span class="lbl">เวลางานของคนนี้ · เว้นว่าง = ใช้เวลางานบริษัท ' + esc(INFO.settings.start) + '–' + esc(INFO.settings.end) + '</span><div class="row">' +
-    f('fs1', 'เวลาเข้างาน', e.shiftStart, 'type="time"') + f('fs2', 'เวลาเลิกงาน', e.shiftEnd, 'type="time"') + '</div></div>' +
-    '<div class="field"><span class="lbl">วันทำงานของคนนี้ · ไม่ติ๊กเลย = ใช้วันทำงานบริษัท (' + esc(TC.util.daysText(INFO.settings.workdays)) + ')</span><div class="days-pick" id="fwd">' + [1, 2, 3, 4, 5, 6, 0].map(function (i) { var cur = TC.util.parseDays(e.workdays) || []; return '<label><input type="checkbox" value="' + i + '"' + (cur.indexOf(i) >= 0 ? ' checked' : '') + '> ' + A.TH_D[i] + '</label>'; }).join('') + '</div></div>' +
-    '<div class="field"><span class="lbl">เวลางานวันเสาร์ (ถ้าต่างจากวันปกติ เช่น เลิก 16:00)</span><div class="row">' + f('fs3', 'เข้างานวันเสาร์', e.satStart, 'type="time"') + f('fs4', 'เลิกงานวันเสาร์', e.satEnd, 'type="time"') + '</div></div>' +
+    scheduleEditor(e) +
     '<div class="field"><span class="lbl">สิทธิ์ลาต่อปี (วัน) · เว้นว่าง = ใช้ค่าเริ่มต้นของบริษัท</span><div class="row">' +
     f('q1', 'ลากิจ', e.qPersonal, 'type="number" min="0" step="0.5" placeholder="' + INFO.settings.qPersonal + '"') + f('q2', 'ลาป่วย', e.qSick, 'type="number" min="0" step="0.5" placeholder="' + INFO.settings.qSick + '"') +
     f('q3', 'ลาพักร้อน', e.qVacation, 'type="number" min="0" step="0.5" placeholder="' + INFO.settings.qVacation + '"') + f('q4', 'ลาคลอด', e.qMaternity, 'type="number" min="0" step="1" placeholder="' + INFO.settings.qMaternity + '"') + '</div></div>' +
@@ -330,11 +384,11 @@ function empForm(e) {
     '<div id="eerr"></div><button class="btn primary block" type="submit">บันทึก</button></form>', 'wide');
   document.getElementById('ef').onsubmit = function (ev) {
     ev.preventDefault(); var g = function (id) { return document.getElementById(id).value; };
-    api('saveEmp', { emp: { id: e.id, code: g('fc'), name: g('fn'), gender: g('fg'), position: g('fp'), phone: g('fph'), email: g('fe'), qPersonal: g('q1'), qSick: g('q2'), qVacation: g('q3'), qMaternity: g('q4'), note: g('fnote'), shiftStart: g('fs1'), shiftEnd: g('fs2'), satStart: g('fs3'), satEnd: g('fs4'), workdays: [].slice.call(document.querySelectorAll('#fwd input:checked')).map(function (i) { return i.value; }).join(',') } })
+    api('saveEmp', { emp: { id: e.id, code: g('fc'), name: g('fn'), gender: g('fg'), position: g('fp'), phone: g('fph'), email: g('fe'), qPersonal: g('q1'), qSick: g('q2'), qVacation: g('q3'), qMaternity: g('q4'), note: g('fnote'), shiftStart: g('fs1'), shiftEnd: g('fs2'), satStart: '', satEnd: '', workdays: readSchedule().workdays, dayTimes: readSchedule().dayTimes } })
       .then(function () { A.closeModal(); A.toast('บันทึกแล้ว'); go('emps'); }).catch(function (x) { err('eerr', x); });
   };
 }
-var IMPORT_COLS = ['code', 'name', 'gender', 'email', 'phone', 'position', 'shiftStart', 'shiftEnd', 'workdays', 'satStart', 'satEnd', 'qPersonal', 'qSick', 'qVacation', 'qMaternity'];
+var IMPORT_COLS = ['code', 'name', 'gender', 'email', 'phone', 'position', 'shiftStart', 'shiftEnd', 'workdays', 'dayTimes', 'satStart', 'satEnd', 'qPersonal', 'qSick', 'qVacation', 'qMaternity'];
 function importForm() {
   A.modal('<div class="sheet-h"><h3>นำเข้าพนักงานจาก CSV</h3><button class="x" data-close aria-label="ปิด">×</button></div><div class="sheet-b">' +
     '<p class="small muted">วางข้อมูลจาก Excel / Google Sheets หรือเลือกไฟล์ .csv · แถวแรกเป็นหัวตาราง คอลัมน์ที่รองรับ: <span class="mono">' + IMPORT_COLS.join(', ') + '</span> · รหัสที่มีอยู่แล้วจะถูกอัปเดต</p>' +

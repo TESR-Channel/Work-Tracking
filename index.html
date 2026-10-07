@@ -119,7 +119,8 @@ function dayRow(x) {
   var tag = x.leave && x.st !== 'leave' ? ' ' + A.pill(x.leave.status === 'approved' ? 'leave' : 'pending', A.leaveLabel(x.leave)) : '';
   return '<li><div style="width:64px" class="num"><b style="font-family:var(--f-display)">' + d.getDate() + ' ' + A.TH_M[d.getMonth()] + '</b><div class="small muted">' + A.TH_D[d.getDay()] + '</div></div>' +
     '<div class="grow mono small muted">' + (r ? esc(r.in) + ' → ' + esc(r.out || '--:--') : (x.st === 'leave' ? esc(A.leaveLabel(x.leave)) : '—')) + '</div>' +
-    (x.st === 'late' ? A.pill('late', 'สาย ' + x.late + ' น.') : A.stPill(x.st)) + tag + '</li>';
+    '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">' + (x.st === 'late' ? A.pill('late', 'สาย ' + x.late + ' น.') : A.stPill(x.st)) +
+    (x.early ? A.pill('late', 'ออกก่อน ' + x.early + ' น.') : '') + (x.flags && x.flags.indexOf('noOut') >= 0 ? A.pill('bad', 'ลืมเช็คเอาท์') : '') + tag + '</div></li>';
 }
 
 /* ================= calendar ================= */
@@ -158,7 +159,8 @@ function dayDetail(x, d) {
   el.innerHTML = '<div class="day-detail"><div class="between"><h3 style="font-size:17px">' + A.thDate(x.date, 'long') + '</h3>' + (x.st === 'future' ? '' : A.stPill(x.st)) + '</div>' +
     '<dl class="kv">' +
     (x.holiday ? '<dt>วันหยุด</dt><dd>' + esc(x.holiday) + '</dd>' : '') +
-    (r ? '<dt>เข้างาน</dt><dd class="mono">' + esc(r.in) + (x.late ? ' <span class="pill late">สาย ' + A.fmtLate(x.late) + '</span>' : '') + '</dd><dt>ออกงาน</dt><dd class="mono">' + esc(r.out || (x.date < ME.today ? 'ไม่ได้เช็คเอาท์' : '--:--')) + '</dd>' + (r.note ? '<dt>หมายเหตุ</dt><dd>' + esc(r.note) + '</dd>' : '') : '') +
+    (x.shift ? '<dt>เวลางาน</dt><dd class="mono">' + esc(x.shift.start) + '–' + esc(x.shift.end) + '</dd>' : '') +
+    (r ? '<dt>เข้างาน</dt><dd class="mono">' + esc(r.in) + (x.late ? ' <span class="pill late">สาย ' + A.fmtLate(x.late) + '</span>' : '') + '</dd><dt>ออกงาน</dt><dd class="mono">' + esc(r.out || (x.date < ME.today ? 'ไม่ได้เช็คเอาท์' : '--:--')) + (x.early ? ' <span class="pill late">ออกก่อน ' + A.fmtLate(x.early) + '</span>' : '') + '</dd>' + (r.note ? '<dt>หมายเหตุ</dt><dd>' + esc(r.note) + '</dd>' : '') : '') +
     (l ? '<dt>การลา</dt><dd>' + esc(A.leaveLabel(l)) + ' ' + A.reqPill(l.status) + '<div class="small muted">' + esc(l.reason) + '</div></dd>' : '') +
     (!r && !l && !x.holiday && x.work && x.date < ME.today ? '<dt>สถานะ</dt><dd>ไม่มีบันทึกเวลา</dd>' : '') +
     '</dl><div class="row">' +
