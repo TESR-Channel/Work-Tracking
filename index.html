@@ -247,8 +247,8 @@ function openLeave(date) {
 }
 function openAdj(date, rec) {
   A.modal('<div class="sheet-h"><h3>ขอแก้เวลา</h3><button class="x" data-close aria-label="ปิด">×</button></div><form class="sheet-b" id="af">' +
-    '<p class="small muted">ใช้เมื่อลืมเช็คอิน/เช็คเอาท์ หรือสแกนไม่ได้ แอดมินจะตรวจสอบก่อนแก้ให้</p>' +
-    '<div class="field"><label for="ad">วันที่</label><input id="ad" type="date" max="' + ME.today + '" value="' + date + '" required></div>' +
+    '<p class="small muted">ใช้เมื่อมาทำงานแต่ลืมเช็คอิน/เช็คเอาท์ หรือสแกนไม่ได้ · ส่งคำขอได้ภายใน 60 วัน · แอดมินอนุมัติแล้วเวลาจะอัปเดตในรายงานทันที</p>' +
+    '<div class="field"><label for="ad">วันที่ (ย้อนหลังได้ไม่เกิน ' + TC.ADJ_WINDOW + ' วัน)</label><input id="ad" type="date" min="' + TC.util.addDays(ME.today, -TC.ADJ_WINDOW) + '" max="' + ME.today + '" value="' + date + '" required></div>' +
     '<div class="row"><div class="field"><label for="ai">เวลาเข้าที่ถูกต้อง</label><input id="ai" type="time" value="' + esc(rec && rec.in || '') + '"></div>' +
     '<div class="field"><label for="ao">เวลาออกที่ถูกต้อง</label><input id="ao" type="time" value="' + esc(rec && rec.out || '') + '"></div></div>' +
     '<div class="field"><label for="ar">เหตุผล</label><textarea id="ar" required placeholder="เช่น ลืมกดเช็คเอาท์ แบตมือถือหมด"></textarea></div>' +
