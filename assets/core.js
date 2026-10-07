@@ -5,7 +5,7 @@
  * ===================================================================== */
 var TC = (function () {
   var TABLES = {
-    EMP: { name: 'Employees', cols: ['id', 'code', 'name', 'gender', 'email', 'phone', 'position', 'photo', 'active', 'username', 'passHash', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note', 'shiftStart', 'shiftEnd', 'workdays', 'satStart', 'satEnd', 'dayTimes', 'deviceId', 'deviceAt'] },
+    EMP: { name: 'Employees', cols: ['id', 'code', 'name', 'gender', 'email', 'phone', 'position', 'photo', 'active', 'username', 'passHash', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note', 'shiftStart', 'shiftEnd', 'workdays', 'satStart', 'satEnd', 'dayTimes', 'deviceId', 'deviceAt', 'startDate'] },
     REC: { name: 'Records', cols: ['date', 'empId', 'code', 'name', 'in', 'out', 'lateMin', 'inDist', 'outDist', 'note', 'updatedAt', 'inPhoto', 'outPhoto', 'flag'] },
     LEAVE: { name: 'Leaves', cols: ['id', 'empId', 'code', 'name', 'type', 'start', 'end', 'part', 'days', 'reason', 'status', 'createdAt', 'decidedAt', 'decidedBy', 'adminNote'] },
     ADJ: { name: 'Adjustments', cols: ['id', 'empId', 'code', 'name', 'date', 'in', 'out', 'reason', 'status', 'createdAt', 'decidedAt', 'decidedBy', 'adminNote'] },
@@ -21,11 +21,12 @@ var TC = (function () {
     qPersonal: '7', qSick: '30', qVacation: '6', qMaternity: '0',
     adminUser: 'admin', adminHash: '', adminPassword: '',
     selfie: '1', deviceLock: 'warn', selfieDays: '90',
-    qrMode: 'static', qrVer: '1'
+    qrMode: 'static', qrVer: '1', startDate: '', driveFolder: ''
   };
   var DEFAULT_ADMIN_PASSWORD = 'tesr1234';
   var ADJ_WINDOW = 60; // ขอแก้เวลาย้อนหลังได้ไม่เกิน 60 วัน
-  var PUBLIC_SETTINGS = ['company', 'office', 'lat', 'lng', 'radius', 'start', 'end', 'grace', 'workdays', 'appUrl', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'selfie', 'deviceLock', 'selfieDays', 'qrMode'];
+  var PUBLIC_SETTINGS = ['company', 'office', 'lat', 'lng', 'radius', 'start', 'end', 'grace', 'workdays', 'appUrl', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'selfie', 'deviceLock', 'selfieDays', 'qrMode', 'startDate'];
+  var ADMIN_SETTINGS = ['driveFolder']; // แอดมินเห็น/แก้ได้ แต่ไม่ส่งให้พนักงาน
   var DEVICE_LOCK = { off: 'ไม่ตรวจ', warn: 'ให้ลงเวลาได้ แต่แจ้งเตือนแอดมิน', block: 'ไม่ให้ลงเวลา' };
   var WRITES = {
     login: 1, register: 1, punch: 1, photo: 1, changePassword: 1, leaveCreate: 1, leaveCancel: 1, adjCreate: 1,
@@ -116,6 +117,7 @@ var TC = (function () {
     s.deviceLock = DEVICE_LOCK[s.deviceLock] ? s.deviceLock : 'warn';
     s.selfieDays = Math.max(0, num(s.selfieDays, 90));
     s.qrMode = s.qrMode === 'daily' ? 'daily' : 'static';
+    s.startDate = isDate(s.startDate) ? s.startDate : '';
     return s;
   }
   function pubSettings(S) { var o = {}; PUBLIC_SETTINGS.forEach(function (k) { o[k] = S[k]; }); return o; }
@@ -123,7 +125,7 @@ var TC = (function () {
   /* ---------- data access ---------- */
   function emps(A) { return A.rows(TABLES.EMP); }
   function isActive(e) { return String(e.active).toUpperCase() !== 'FALSE'; }
-  function pubEmp(e) { return { id: e.id, code: e.code, name: e.name, gender: e.gender, position: e.position, photo: e.photo, email: e.email, phone: e.phone, shiftStart: e.shiftStart || '', shiftEnd: e.shiftEnd || '', workdays: e.workdays || '', satStart: e.satStart || '', satEnd: e.satEnd || '', dayTimes: e.dayTimes || '', device: e.deviceId ? (e.deviceAt || 'ลงทะเบียนแล้ว') : '' }; }
+  function pubEmp(e) { return { id: e.id, code: e.code, name: e.name, gender: e.gender, position: e.position, photo: e.photo, email: e.email, phone: e.phone, shiftStart: e.shiftStart || '', shiftEnd: e.shiftEnd || '', workdays: e.workdays || '', satStart: e.satStart || '', satEnd: e.satEnd || '', dayTimes: e.dayTimes || '', startDate: e.startDate || '', device: e.deviceId ? (e.deviceAt || 'ลงทะเบียนแล้ว') : '' }; }
   function recObj(r) { return { date: r.date, empId: r.empId, in: r.in, out: r.out, lateMin: num(r.lateMin, 0), inDist: num(r.inDist, null), outDist: num(r.outDist, null), note: r.note || '', inPhoto: r.inPhoto || '', outPhoto: r.outPhoto || '', flag: r.flag || '' }; }
   function leaveObj(l) { return { id: l.id, empId: l.empId, code: l.code, name: l.name, type: l.type, start: l.start, end: l.end, part: l.part || 'full', days: num(l.days, 0), reason: l.reason, status: l.status, createdAt: l.createdAt, decidedAt: l.decidedAt, adminNote: l.adminNote || '' }; }
   function adjObj(a) { return { id: a.id, empId: a.empId, code: a.code, name: a.name, date: a.date, in: a.in, out: a.out, reason: a.reason, status: a.status, createdAt: a.createdAt, decidedAt: a.decidedAt, adminNote: a.adminNote || '' }; }
@@ -215,8 +217,14 @@ var TC = (function () {
         c.A.rows(TABLES.ADJ).filter(function (a) { return a.empId === e.id && a.status === 'pending'; }).length
     };
   }
+  /** วันเริ่มใช้ระบบ: ตั้งเองในหน้าตั้งค่า หรือถ้าไม่ได้ตั้ง ใช้วันแรกที่มีคนลงเวลา · ก่อนวันนี้ไม่นับขาด */
+  function goLive(c) {
+    if (c.S.startDate) return c.S.startDate;
+    var first = ''; c.A.rows(TABLES.REC).forEach(function (r) { if (isDate(r.date) && (!first || r.date < first)) first = r.date; });
+    return first || c.now.date;
+  }
   function myMonth(c) {
-    var e = myEmp(c), m = str(c.p.month);
+    var e = myEmp(c), m = str(c.p.month); c.S.goLive = goLive(c);
     if (!isMonth(m)) throw E('เดือนไม่ถูกต้อง');
     var data = monthData(c, m, [e]);
     data.report = monthReport(m, [e], data.records, data.leaves, data.holidays, c.S, c.now.date)[0];
@@ -357,6 +365,7 @@ var TC = (function () {
   }
   function adminMonth(c) {
     var m = str(c.p.month); if (!isMonth(m)) throw E('เดือนไม่ถูกต้อง');
+    c.S.goLive = goLive(c);
     var list = employeesForMonth(c, m), data = monthData(c, m, list);
     data.report = monthReport(m, list, data.records, data.leaves, data.holidays, c.S, c.now.date);
     return data;
@@ -418,12 +427,13 @@ var TC = (function () {
       return o;
     });
   }
-  var EMP_FIELDS = ['code', 'name', 'gender', 'email', 'phone', 'position', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note', 'shiftStart', 'shiftEnd', 'workdays', 'satStart', 'satEnd', 'dayTimes'];
+  var EMP_FIELDS = ['code', 'name', 'gender', 'email', 'phone', 'position', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note', 'shiftStart', 'shiftEnd', 'workdays', 'satStart', 'satEnd', 'dayTimes', 'startDate'];
   function cleanEmp(src) {
     var o = {};
     EMP_FIELDS.forEach(function (k) { if (src[k] !== undefined) o[k] = str(src[k]); });
     if (o.phone !== undefined) o.phone = digits(o.phone);
     if (o.email !== undefined) { o.email = o.email.toLowerCase(); if (o.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(o.email)) throw E('อีเมลไม่ถูกต้อง: ' + o.email); }
+    if (o.startDate !== undefined && o.startDate && !isDate(o.startDate)) throw E('วันเริ่มงานต้องอยู่ในรูปแบบ ปปปป-ดด-วว เช่น 2026-10-08');
     if (o.workdays !== undefined) { var wd = parseDays(o.workdays); o.workdays = wd ? wd.join(',') : ''; }
     if (o.dayTimes !== undefined) {
       var raw = o.dayTimes.split(/[;\n]+/).filter(function (x) { return x.trim(); }), parsed = parseDayTimes(o.dayTimes);
@@ -498,7 +508,8 @@ var TC = (function () {
   }
   function saveSettings(c) {
     var s = c.p.settings || {};
-    PUBLIC_SETTINGS.forEach(function (k) { if (s[k] !== undefined) c.A.setSetting(k, Array.isArray(s[k]) ? s[k].join(',') : str(s[k])); });
+    if (s.startDate && !isDate(str(s.startDate))) throw E('วันเริ่มใช้ระบบไม่ถูกต้อง');
+    PUBLIC_SETTINGS.concat(ADMIN_SETTINGS).forEach(function (k) { if (s[k] !== undefined) c.A.setSetting(k, Array.isArray(s[k]) ? s[k].join(',') : str(s[k])); });
     return pubSettings(settings(c.A));
   }
   function changeAdmin(c) {
@@ -530,6 +541,7 @@ var TC = (function () {
   }
   function buildMonth(c) {
     var m = str(c.p.month); if (!isMonth(m)) throw E('เดือนไม่ถูกต้อง');
+    c.S.goLive = goLive(c);
     var list = employeesForMonth(c, m), d = monthData(c, m, list);
     var rep = monthReport(m, list, d.records, d.leaves, d.holidays, c.S, c.now.date);
     return { url: c.A.buildMonthSheet ? c.A.buildMonthSheet(m, rep, c.S, c.now) : '' };
@@ -551,15 +563,16 @@ var TC = (function () {
         if (l.empId !== e.id || (l.status !== 'approved' && l.status !== 'pending')) return;
         range(l.start, l.end).forEach(function (d) { if (d.indexOf(m) === 0 && (!lby[d] || l.status === 'approved')) lby[d] = l; });
       });
-      var wdays = daysOf(e, S);
+      var wdays = daysOf(e, S), from = S.goLive || '';
+      if (isDate(e.startDate) && e.startDate > from) from = e.startDate;
       var t = { devFlags: 0, workdays: 0, present: 0, lateDays: 0, lateMin: 0, earlyDays: 0, earlyMin: 0, absent: 0, noOut: 0, minutes: 0, leaveDays: 0, leaveToDate: 0, leave: {} };
       Object.keys(LEAVE_TYPES).forEach(function (k) { t.leave[k] = 0; });
       var list = days.map(function (d) {
         var work = wdays.indexOf(dow(d)) >= 0 && !hm[d];
-        var r = rby[d] || null, l = lby[d] || null, la = l && l.status === 'approved' ? l : null, late = 0, st;
+        var r = rby[d] || null, l = lby[d] || null, la = l && l.status === 'approved' ? l : null, late = 0, st, pre = !!from && d < from && !r;
         var sh = shiftOf(e, S, d), early = 0, flags = [];
         if (la && work) { var amt = la.part === 'full' ? 1 : 0.5; t.leave[la.type] = (t.leave[la.type] || 0) + amt; t.leaveDays += amt; if (d <= today) t.leaveToDate += amt; }
-        if (work && d <= today) t.workdays++;
+        if (work && d <= today && !pre) t.workdays++;
         if (r) {
           t.present++;
           late = la && la.part === 'am' ? 0 : num(r.lateMin, 0);
@@ -572,6 +585,7 @@ var TC = (function () {
           if (r.flag) { t.devFlags++; flags.push('device'); }
           st = late > 0 ? 'late' : 'ok';
         } else if (!work) st = hm[d] ? 'holiday' : 'off';
+        else if (pre && !la) st = 'pre';
         else if (la && la.part === 'full') st = 'leave';
         else if (d > today) st = 'future';
         else if (d === today) st = 'pending';
@@ -624,6 +638,7 @@ var TC = (function () {
           T.lv[k] += amt; c[14 + ['personal', 'sick', 'vacation', 'other'].indexOf(k)] = amt;
           notes.push(LEAVE_TYPES[la.type] + (la.part !== 'full' ? ' (' + PART[la.part] + ')' : '') + (la.reason ? ': ' + la.reason : ''));
         } else if (x.leave && x.leave.status === 'pending') notes.push(LEAVE_TYPES[x.leave.type] + ' รออนุมัติ');
+        if (x.st === 'pre') notes.push('ยังไม่เริ่มใช้ระบบ');
         if (rec && rec.note) notes.push(rec.note);
         if (rec && rec.flag) notes.push('ตรวจสอบมือถือ: ' + rec.flag);
         c[18] = notes.join(' · ');
@@ -643,7 +658,7 @@ var TC = (function () {
     adminToday: adminToday, adminMonth: adminMonth, requests: requests, decide: decide, employees: employees, saveEmp: saveEmp,
     importEmps: importEmps, delEmp: delEmp, restoreEmp: restoreEmp, resetLogin: resetLogin, resetDevice: resetDevice, selfie: selfie, holidays: listHolidays, saveHoliday: saveHoliday,
     delHoliday: delHoliday, saveSettings: saveSettings, changeAdmin: changeAdmin, qr: qr, rotateQr: rotateQr, editRecord: editRecord, buildMonth: buildMonth,
-    settings: function (c) { return { settings: pubSettings(c.S), adminUser: c.S.adminUser, mustChange: !c.S.adminHash }; }
+    settings: function (c) { return { settings: pubSettings(c.S), admin: { driveFolder: str(c.A.getSettings().driveFolder) }, goLive: goLive(c), adminUser: c.S.adminUser, mustChange: !c.S.adminHash }; }
   };
   function run(A, p) {
     var c = { A: A, p: p, now: A.now() };
@@ -670,7 +685,7 @@ var TC = (function () {
   }
 
   return {
-    handle: handle, monthReport: monthReport, exportTable: exportTable, ADJ_WINDOW: ADJ_WINDOW, TABLES: TABLES, LEAVE_TYPES: LEAVE_TYPES, PART: PART, STATUS: STATUS,
+    handle: handle, WRITES: WRITES, monthReport: monthReport, exportTable: exportTable, ADJ_WINDOW: ADJ_WINDOW, TABLES: TABLES, LEAVE_TYPES: LEAVE_TYPES, PART: PART, STATUS: STATUS,
     DEFAULTS: DEFAULTS, util: { monthDays: monthDays, dow: dow, addDays: addDays, range: range, toMin: toMin, haversine: haversine, fmtDist: fmtDist, lateOf: lateOf, shiftOf: shiftOf, daysOf: daysOf, parseDays: parseDays, daysText: daysText, scheduleText: scheduleText, parseDayTimes: parseDayTimes, dayTimesText: dayTimesText, customSchedule: customSchedule, isDate: isDate, isTime: isTime }
   };
 })();
