@@ -297,16 +297,27 @@ function vMe(el) {
 
 /* ================= punch: 1) QR 2) GPS 3) ยืนยัน ================= */
 function openPunch(kind, presetToken) {
-  var token = presetToken || '', pos = null, stopCam = null, src = 'sim-in', S = ME.settings;
-  var m = A.modal('<div class="viewfinder"><video id="vid" muted playsinline hidden></video><div class="frame"><i></i><i></i><i></i><i></i><div class="laser"></div></div><div class="cap" id="vcap">เล็ง QR Code ที่ติดหน้าออฟฟิศ</div></div>' +
+  var token = presetToken || '', pos = null, stopCam = null, src = 'sim-in', S = ME.settings, sent = false;
+  A.sound.unlock();
+  var m = A.modal('<div class="viewfinder"><video id="vid" muted playsinline hidden></video><div class="frame"><i></i><i></i><i></i><i></i><div class="laser"></div></div><div class="cap" id="vcap">เล็ง QR Code ที่ติดหน้าออฟฟิศ</div><div class="vf-done" id="vdone" hidden></div></div>' +
     '<div class="sheet-b" style="padding-top:14px"><div class="steps"><div class="step" id="sq"><span class="sd"></span><div id="sq-t">รอสแกน QR Code</div></div><div class="step" id="sg"><span class="sd"></span><div id="sg-t">กำลังหาตำแหน่ง…</div></div></div>' +
     (A.REMOTE ? '' : '<details open><summary class="small muted" style="cursor:pointer">โหมดทดลอง</summary><div class="row" style="margin-top:8px"><div class="field"><label for="src">ตำแหน่งมือถือ</label><select id="src"><option value="sim-in">จำลอง: อยู่ในออฟฟิศ</option><option value="sim-out">จำลอง: นอกพื้นที่ ~3 กม.</option><option value="gps">GPS จริงของเครื่อง</option></select></div></div><button class="btn ghost sm" id="fake" style="margin-top:8px">จำลองการสแกน QR</button></details>') +
     '<div id="res"></div><div class="row"><button class="btn ghost" id="cl">ยกเลิก</button><button class="btn ' + (kind === 'in' ? 'primary' : 'gold') + '" id="go" disabled>ยืนยัน' + (kind === 'in' ? 'เช็คอิน' : 'เช็คเอาท์') + '</button></div></div>');
   var $ = function (id) { return document.getElementById(id); };
   var step = function (id, cls, html) { $(id).className = 'step ' + (cls || ''); $(id + '-t').innerHTML = html; };
-  var ready = function () { $('go').disabled = !(token && pos && pos.dist <= S.radius); };
+  var CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+  var CROSS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+  var WAIT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="9" opacity=".25"/><path d="M12 3a9 9 0 019 9"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.9s" repeatCount="indefinite"/></path></svg>';
+  var vf = function (cls, icon, title, sub) { var d = $('vdone'); if (!d) return; d.hidden = false; d.className = 'vf-done ' + cls; d.innerHTML = '<div class="ic">' + icon + '</div><b>' + title + '</b>' + (sub ? '<span>' + sub + '</span>' : ''); };
+  var ready = function () {
+    var ok = !!(token && pos && pos.dist <= S.radius);
+    $('go').disabled = !ok;
+    if (ok && !sent) submit();
+    else if (token && !sent && !pos) vf('ok', CHECK, 'สแกน QR สำเร็จ', 'กำลังตรวจตำแหน่ง…');
+    else if (token && !sent && pos && !ok && pos.warned !== true) { pos.warned = true; A.sound.bad(); vf('bad', CROSS, 'อยู่นอกพื้นที่', 'ห่างออฟฟิศ ' + TC.util.fmtDist(pos.dist) + ' · ลงเวลาไม่ได้'); }
+  };
   var parse = function (t) { t = String(t || '').trim(); try { var u = new URL(t), v = u.searchParams.get('t'); if (v) return v; } catch (e) {} var p = t.split('|'); return p.length >= 3 ? p[2] : t; };
-  var got = function (t) { token = parse(t); if (stopCam) { stopCam(); stopCam = null; } $('vid').hidden = true; step('sq', 'ok', '<b>อ่าน QR แล้ว</b>'); $('vcap').textContent = 'อ่าน QR สำเร็จ'; ready(); };
+  var got = function (t) { token = parse(t); if (stopCam) { stopCam(); stopCam = null; } $('vid').hidden = true; A.sound.scan(); vf('ok', CHECK, 'สแกน QR สำเร็จ', pos ? '' : 'กำลังตรวจตำแหน่ง…'); step('sq', 'ok', '<b>อ่าน QR แล้ว</b>'); $('vcap').textContent = ''; ready(); };
   var show = function () {
     var d = TC.util.haversine(pos.lat, pos.lng, S.lat, S.lng), ok = d <= S.radius; pos.dist = d;
     step('sg', ok ? 'ok' : 'bad', '<b>' + (ok ? 'อยู่ในพื้นที่' : 'อยู่นอกพื้นที่') + '</b> · ห่างออฟฟิศ <span class="num">' + TC.util.fmtDist(d) + '</span><br><small>อนุญาตไม่เกิน ' + TC.util.fmtDist(S.radius) + ' · ' + pos.label + '</small>'); ready();
@@ -315,7 +326,7 @@ function openPunch(kind, presetToken) {
     pos = null; step('sg', '', 'กำลังขอตำแหน่ง GPS…'); ready();
     if (!navigator.geolocation) return step('sg', 'bad', '<b>เครื่องนี้ไม่รองรับ GPS</b>');
     navigator.geolocation.getCurrentPosition(function (p) { pos = { lat: p.coords.latitude, lng: p.coords.longitude, label: 'GPS ±' + Math.round(p.coords.accuracy) + ' ม.' }; show(); },
-      function () { step('sg', 'bad', '<b>ไม่ได้รับสิทธิ์ตำแหน่ง</b><br><small>เปิด Location ให้เบราว์เซอร์ แล้วลองใหม่</small>'); }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 });
+      function () { step('sg', 'bad', '<b>ไม่ได้รับสิทธิ์ตำแหน่ง</b><br><small>เปิด Location ให้เบราว์เซอร์ แล้วลองใหม่</small>'); if (token) { A.sound.bad(); vf('bad', CROSS, 'ไม่ได้รับตำแหน่ง GPS', 'เปิด Location แล้วลองใหม่'); } }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 });
   };
   var locate = function () {
     if (src === 'sim-in') { pos = { lat: S.lat + 0.0012, lng: S.lng + 0.001, label: 'ตำแหน่งจำลอง' }; show(); }
@@ -345,16 +356,25 @@ function openPunch(kind, presetToken) {
   if (token) got(token); else camera();
   if (A.REMOTE) gps(); else { locate(); $('src').onchange = function (ev) { src = ev.target.value; locate(); }; $('fake').onclick = function () { got('TESR-ATTEND|x|' + TCMock.qrToken()); }; }
   $('cl').onclick = A.closeModal;
-  $('go').onclick = function () {
-    var go = $('go'); go.disabled = true; go.textContent = 'กำลังบันทึก…';
+  function submit() {
+    var go = $('go'); sent = true; go.disabled = true; go.textContent = 'กำลังบันทึก…';
+    vf('wait', WAIT, 'กำลังบันทึกเวลา…', '');
     api('punch', { token2: token, lat: pos.lat, lng: pos.lng }).then(function (res) {
-      var r = res.rec;
+      var r = res.rec, late = res.kind === 'in' && r.lateMin;
+      if (late) A.sound.warn(); else A.sound.ok();
+      vf(late ? 'warn' : 'ok', CHECK, (res.kind === 'in' ? 'เช็คอิน ' + esc(r.in) : 'เช็คเอาท์ ' + esc(r.out)) + ' น.', res.kind === 'in' ? (late ? 'มาสาย ' + A.fmtLate(r.lateMin) : 'ตรงเวลา ขอให้เป็นวันที่ดี') : 'บันทึกเวลาออกงานแล้ว');
       $('res').innerHTML = res.kind === 'in'
-        ? '<div class="result ' + (r.lateMin ? 'late' : 'ok') + '"><h3 class="num">เช็คอิน ' + esc(r.in) + '</h3>' + (r.lateMin ? 'มาสาย ' + A.fmtLate(r.lateMin) : 'ตรงเวลา ขอให้เป็นวันที่ดี') + '</div>'
-        : '<div class="result ok"><h3 class="num">เช็คเอาท์ ' + esc(r.out) + '</h3>บันทึกเวลาออกงานแล้ว</div>';
+        ? '<div class="result ' + (late ? 'late' : 'ok') + '"><h3 class="num">เช็คอินสำเร็จ ' + esc(r.in) + '</h3>' + (late ? 'มาสาย ' + A.fmtLate(r.lateMin) : 'ตรงเวลา ขอให้เป็นวันที่ดี') + '</div>'
+        : '<div class="result ok"><h3 class="num">เช็คเอาท์สำเร็จ ' + esc(r.out) + '</h3>บันทึกเวลาออกงานแล้ว</div>';
       go.textContent = 'เสร็จสิ้น'; go.disabled = false; go.onclick = function () { A.closeModal(); refresh(); };
-    }).catch(function (e) { $('res').innerHTML = '<div class="result bad"><h3>ลงเวลาไม่สำเร็จ</h3>' + esc(e.message) + '</div>'; go.textContent = 'ลองอีกครั้ง'; ready(); });
-  };
+    }).catch(function (e) {
+      A.sound.bad(); vf('bad', CROSS, 'ลงเวลาไม่สำเร็จ', esc(e.message));
+      $('res').innerHTML = '<div class="result bad"><h3>ลงเวลาไม่สำเร็จ</h3>' + esc(e.message) + '</div>';
+      go.textContent = 'ลองอีกครั้ง'; go.disabled = !(token && pos && pos.dist <= S.radius);
+      go.onclick = function () { A.sound.unlock(); submit(); };
+    });
+  }
+  $('go').onclick = function () { A.sound.unlock(); submit(); };
 }
 
 start();
