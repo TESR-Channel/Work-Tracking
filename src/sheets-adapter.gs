@@ -21,11 +21,15 @@ const TH_D = ['อา.','จ.','อ.','พ.','พฤ.','ศ.','ส.'];
 const ST_TH = { ok: 'มา', late: 'สาย', absent: 'ขาด', leave: 'ลา', pending: 'ยังไม่เข้างาน', holiday: 'วันหยุด', off: 'วันหยุดประจำสัปดาห์', future: '' };
 
 /* ===================== Web API ===================== */
-function doGet(e) { return json_({ ok: true, data: 'TESR Time Clock API' }); }
+/** GET = ปลุกเซิร์ฟเวอร์ + เตรียมแคชตารางไว้ล่วงหน้า (หน้าเว็บเรียกตอนเปิดหน้า ระหว่างที่ผู้ใช้กำลังพิมพ์รหัส) */
+function doGet(e) {
+  try { const A = SheetsAdapter_({ readOnly: true }); A.getSettings(); Object.keys(TC.TABLES).forEach(k => A.rows(TC.TABLES[k])); } catch (err) {}
+  return json_({ ok: true, data: 'TESR Time Clock API' });
+}
 function doPost(e) {
   let p = {};
   try { p = JSON.parse(e.postData.contents); } catch (err) {}
-  return json_(TC.handle(SheetsAdapter_(), p));
+  return json_(TC.handle(SheetsAdapter_({ readOnly: !TC.WRITES[p.action] }), p));
 }
 function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
 
@@ -34,6 +38,7 @@ function setup() {
   const ss = SpreadsheetApp.getActive();
   ss.setSpreadsheetTimeZone(TZ);
   Object.keys(TC.TABLES).forEach(k => ensureTable_(TC.TABLES[k]));
+  Object.keys(TC.TABLES).forEach(k => tcDrop_(TC.TABLES[k].name)); tcDrop_('Settings');
   const set = ensureSettings_();
   const cur = readSettingsRaw_();
   Object.keys(TC.DEFAULTS).forEach(k => { if (!(k in cur)) set.appendRow([k, String(TC.DEFAULTS[k])]); });
@@ -86,36 +91,81 @@ function internalAdminToken_(A, now) {
   return p + '.' + A.hmac(p);
 }
 
+/* ===================== แคชตาราง (ให้หน้าเว็บโหลดเร็วขึ้น) =====================
+ * คำสั่งที่อ่านอย่างเดียว ใช้ข้อมูลตารางจาก CacheService (เร็วกว่าอ่านชีตมาก) นานสุด 5 นาที
+ * ทุกครั้งที่ระบบเขียนข้อมูล หรือมีคนแก้ชีตด้วยมือ (onEdit) แคชของตารางนั้นจะถูกล้างทันที
+ * คำสั่งที่เขียนข้อมูลอ่านจากชีตจริงเสมอ จึงไม่มีทางเขียนทับข้อมูลผิดแถว */
+const TCACHE_TTL = 300, TCHUNK = 90000;
+function tcGen_(sc, name) { let g = sc.get('g:' + name); if (!g) { g = Utilities.getUuid().slice(0, 8); sc.put('g:' + name, g, 21600); } return g; }
+function tcDrop_(name) { try { CacheService.getScriptCache().put('g:' + name, Utilities.getUuid().slice(0, 8), 21600); } catch (e) {} }
+function tcGet_(sc, name, g) {
+  const meta = sc.get('tb:' + name + ':' + g); if (!meta) return null;
+  const n = Number(meta), keys = []; for (let i = 0; i < n; i++) keys.push('tb:' + name + ':' + g + ':' + i);
+  const got = sc.getAll(keys); let str = '';
+  for (const k of keys) { if (got[k] == null) return null; str += got[k]; }
+  try { return JSON.parse(str); } catch (e) { return null; }
+}
+function tcPut_(sc, name, g, data) {
+  const str = JSON.stringify(data); if (str.length > 1500000) return;
+  const n = Math.ceil(str.length / TCHUNK) || 1, parts = {};
+  for (let i = 0; i < n; i++) parts['tb:' + name + ':' + g + ':' + i] = str.substr(i * TCHUNK, TCHUNK);
+  if (sc.get('g:' + name) !== g) return; // มีการเขียนระหว่างที่อ่าน → ไม่เก็บ
+  sc.putAll(parts, TCACHE_TTL); sc.put('tb:' + name + ':' + g, String(n), TCACHE_TTL);
+}
+/** แก้ชีตด้วยมือ → ล้างแคชของชีตนั้น */
+function onEdit(e) { try { tcDrop_(e.range.getSheet().getName()); } catch (err) {} }
+
 /* ===================== Sheets adapter ===================== */
-function SheetsAdapter_() {
+function SheetsAdapter_(opts) {
+  opts = opts || {};
   const ss = SpreadsheetApp.getActive();
   const cache = {};
   const secret = PropertiesService.getScriptProperties().getProperty('SECRET') || 'tesr-time-clock';
   const sc = CacheService.getScriptCache();
-  function load(t) {
-    if (cache[t.name]) return cache[t.name];
-    const sh = ensureTable_(t), v = sh.getDataRange().getValues(), head = v[0].map(String);
+  const useCache = !!opts.readOnly;
+  let settingsMemo = null;
+  function readSheet(t) {
+    let sh = ss.getSheetByName(t.name);
+    if (!sh) sh = ensureTable_(t);
+    let v = sh.getDataRange().getValues(), head = v[0].map(String);
+    if (t.cols.some(c => head.indexOf(c) < 0)) { ensureTable_(t); v = sh.getDataRange().getValues(); head = v[0].map(String); }
     const out = [];
     for (let i = 1; i < v.length; i++) {
       const o = { _row: i + 1 }; let any = false;
       head.forEach((k, j) => { if (!k) return; o[k] = norm_(v[i][j], k); if (o[k] !== '') any = true; });
       if (any) out.push(o);
     }
-    cache[t.name] = { sh, head, rows: out };
-    return cache[t.name];
+    return { sh, head, rows: out };
   }
+  function load(t) {
+    if (cache[t.name]) return cache[t.name];
+    if (useCache) {
+      const g = tcGen_(sc, t.name), hit = tcGet_(sc, t.name, g);
+      if (hit) { cache[t.name] = { sh: null, head: hit.head, rows: hit.rows }; return cache[t.name]; }
+      const d = readSheet(t);
+      try { tcPut_(sc, t.name, g, { head: d.head, rows: d.rows }); } catch (e) {}
+      return (cache[t.name] = d);
+    }
+    return (cache[t.name] = readSheet(t));
+  }
+  function sheetOf(t, d) { if (!d.sh) d.sh = ss.getSheetByName(t.name) || ensureTable_(t); return d.sh; }
   function writeRow(t, row, obj) {
-    const d = load(t);
+    const d = load(t); tcDrop_(t.name);
     const vals = d.head.map(k => obj[k] === undefined || obj[k] === null ? '' : String(obj[k]));
-    d.sh.getRange(row, 1, 1, d.head.length).setNumberFormat('@').setValues([vals]);
+    sheetOf(t, d).getRange(row, 1, 1, d.head.length).setNumberFormat('@').setValues([vals]);
   }
   return {
     rows: t => load(t).rows,
-    insert(t, obj) { const d = load(t); const row = d.sh.getLastRow() + 1; writeRow(t, row, obj); const o = Object.assign({ _row: row }, obj); d.rows.push(o); return o; },
-    update(t, ref, patch) { const d = load(t); Object.assign(ref, patch); writeRow(t, ref._row, ref); },
-    remove(t, ref) { const d = load(t); d.sh.deleteRow(ref._row); delete cache[t.name]; },
-    getSettings: readSettingsRaw_,
+    insert(t, obj) { const d = load(t); const row = sheetOf(t, d).getLastRow() + 1; writeRow(t, row, obj); const o = Object.assign({ _row: row }, obj); d.rows.push(o); return o; },
+    update(t, ref, patch) { load(t); Object.assign(ref, patch); writeRow(t, ref._row, ref); },
+    remove(t, ref) { const d = load(t); tcDrop_(t.name); sheetOf(t, d).deleteRow(ref._row); delete cache[t.name]; },
+    getSettings() {
+      if (settingsMemo) return settingsMemo;
+      if (useCache) { const g = tcGen_(sc, 'Settings'), hit = tcGet_(sc, 'Settings', g); if (hit) return (settingsMemo = hit); settingsMemo = readSettingsRaw_(); try { tcPut_(sc, 'Settings', g, settingsMemo); } catch (e) {} return settingsMemo; }
+      return (settingsMemo = readSettingsRaw_());
+    },
     setSetting(k, v) {
+      settingsMemo = null; tcDrop_('Settings');
       const sh = ensureSettings_(), vals = sh.getDataRange().getValues();
       for (let i = 1; i < vals.length; i++) if (String(vals[i][0]) === k) { sh.getRange(i + 1, 2).setNumberFormat('@').setValue(String(v)); return; }
       sh.appendRow([k, String(v)]);
@@ -141,8 +191,10 @@ function SheetsAdapter_() {
     getSelfie(id) {
       let f; try { f = DriveApp.getFileById(id); } catch (e) { return ''; }
       if (f.isTrashed()) return '';
-      const folderId = selfieFolder_().getId(), parents = f.getParents();
-      let inside = false; while (parents.hasNext()) if (parents.next().getId() === folderId) inside = true;
+      const all = PropertiesService.getScriptProperties().getProperties(), ok = {};
+      Object.keys(all).forEach(k => { if (k.indexOf('SELFIE_FOLDER') === 0) ok[all[k]] = 1; });
+      const parents = f.getParents();
+      let inside = false; while (parents.hasNext()) if (ok[parents.next().getId()]) inside = true;
       if (!inside) return '';
       return 'data:image/jpeg;base64,' + Utilities.base64Encode(f.getBlob().getBytes());
     },
@@ -184,21 +236,22 @@ function norm_(v, k) {
   const s = v === null || v === undefined ? '' : String(v).trim();
   return /^\d:\d\d$/.test(s) ? '0' + s : s;
 }
-function photoFolder_() {
-  const props = PropertiesService.getScriptProperties(), id = props.getProperty('PHOTO_FOLDER');
-  if (id) { try { return DriveApp.getFolderById(id); } catch (e) {} }
-  const f = DriveApp.createFolder('TESR Time Clock · Photos');
-  props.setProperty('PHOTO_FOLDER', f.getId());
+/** โฟลเดอร์เก็บรูป: ถ้าตั้ง "driveFolder" (ลิงก์หรือ ID) ในหน้าตั้งค่า จะสร้างโฟลเดอร์ย่อยไว้ในนั้น */
+function subFolder_(propKey, name, fallbackName) {
+  const props = PropertiesService.getScriptProperties();
+  const m = String(readSettingsRaw_().driveFolder || '').match(/[-\w]{20,}/), parentId = m ? m[0] : '';
+  const key = propKey + (parentId ? ':' + parentId : ''), id = props.getProperty(key);
+  if (id) { try { const f = DriveApp.getFolderById(id); if (!f.isTrashed()) return f; } catch (e) {} }
+  let f;
+  if (parentId) {
+    const parent = DriveApp.getFolderById(parentId), it = parent.getFoldersByName(name);
+    f = it.hasNext() ? it.next() : parent.createFolder(name);
+  } else f = DriveApp.createFolder(fallbackName);
+  props.setProperty(key, f.getId());
   return f;
 }
-
-function selfieFolder_() {
-  const props = PropertiesService.getScriptProperties(), id = props.getProperty('SELFIE_FOLDER');
-  if (id) { try { return DriveApp.getFolderById(id); } catch (e) {} }
-  const f = DriveApp.createFolder('TESR Time Clock · Selfies (private)');
-  props.setProperty('SELFIE_FOLDER', f.getId());
-  return f;
-}
+function photoFolder_() { return subFolder_('PHOTO_FOLDER', 'รูปโปรไฟล์', 'TESR Time Clock · Photos'); }
+function selfieFolder_() { return subFolder_('SELFIE_FOLDER', 'เซลฟี่ลงเวลา (ส่วนตัว)', 'TESR Time Clock · Selfies (private)'); }
 /** ลบเซลฟี่ที่เก่ากว่าจำนวนวันที่ตั้งไว้ (Settings: selfieDays · 0 = เก็บตลอด) */
 function cleanupSelfies_() {
   const raw = readSettingsRaw_(), days = raw.selfieDays === undefined || raw.selfieDays === '' ? 90 : Number(raw.selfieDays);
