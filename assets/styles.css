@@ -318,3 +318,21 @@ td.num,td.mono,td.r{white-space:nowrap}
 .vf-done.wait{background:#2b2522}
 @keyframes vfpop{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.vf-done{animation:none}}
+/* เซลฟี่ยืนยันตัวตน */
+.viewfinder video.mirror{transform:scaleX(-1)}
+.viewfinder .oval{position:absolute;z-index:1;width:46%;aspect-ratio:3/4;border:3px dashed rgba(255,255,255,.85);border-radius:50%;box-shadow:0 0 0 9999px rgba(0,0,0,.35)}
+.viewfinder .shutter{position:absolute;z-index:2;bottom:14px;left:50%;transform:translateX(-50%);width:68px;height:68px;border-radius:50%;border:5px solid #fff;background:var(--crimson);box-shadow:0 2px 12px rgba(0,0,0,.4);cursor:pointer}
+.viewfinder .shutter:active{transform:translateX(-50%) scale(.92)}
+.viewfinder .cap{pointer-events:none}
+.viewfinder .oval:not([hidden])~.cap{top:10px;bottom:auto}
+.vf-done .ic img.selfie-thumb{width:84px;height:84px;border-radius:50%;object-fit:cover;border:3px solid #fff}
+.selfie-pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.selfie-pair figure{margin:0;text-align:center}
+.selfie-pair img{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:12px;background:var(--line,#ddd)}
+.selfie-pair figcaption{font-size:13px;color:var(--muted);margin-top:6px}
+.cam-btn{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer;vertical-align:middle;margin-left:4px;padding:0}
+.cam-btn svg{width:15px;height:15px}
+.sthumbs{display:inline-flex;gap:4px;border:0;background:none;padding:0;cursor:pointer}
+.sthumbs img{width:34px;height:34px;border-radius:50%;object-fit:cover;background:var(--line);border:2px solid var(--surface)}
+.sthumbs img.gone{opacity:.3}
+.selfie-pair .ph{aspect-ratio:3/4;border-radius:12px;background:var(--line);display:grid;place-items:center;font-size:13px;color:var(--muted);padding:8px;text-align:center}
