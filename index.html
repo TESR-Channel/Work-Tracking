@@ -29,39 +29,22 @@ var urlToken = '';
 try { var q = new URLSearchParams(location.search); urlToken = q.get('t') || ''; if (urlToken) history.replaceState(null, '', location.pathname); } catch (e) {}
 
 /* ================= login / register ================= */
-function showLogin(msg, tab) {
-  tab = tab || 'login';
-  root.innerHTML = '<div class="login-wrap"><div class="login-card">' +
-    '<div class="login-brand"><div class="mark">TESR</div><div><b>Time Clock</b><small>ลงเวลาเข้า–ออกงาน · สำหรับพนักงาน</small></div></div>' +
-    '<div class="seg" role="group"><button data-tab="login" aria-pressed="' + (tab === 'login') + '">เข้าสู่ระบบ</button><button data-tab="reg" aria-pressed="' + (tab === 'reg') + '">ลงทะเบียนครั้งแรก</button></div>' +
-    (tab === 'login'
-      ? '<form id="lf" class="stack"><div class="field"><label for="u">ชื่อผู้ใช้</label><input id="u" autocomplete="username" autocapitalize="none" required></div>' +
-        '<div class="field"><label for="p">รหัสผ่าน</label><input id="p" type="password" autocomplete="current-password" required></div>' +
-        '<div id="lerr"></div><button class="btn primary block" type="submit">เข้าสู่ระบบ</button>' +
-        '<p class="small muted">ลืมรหัสผ่าน แจ้งแอดมินให้รีเซ็ต แล้วลงทะเบียนใหม่ได้ทันที</p></form>'
-      : '<form id="rf" class="stack"><p class="small muted">ยืนยันตัวตนด้วยรหัสพนักงานและเบอร์โทรที่ให้ไว้กับบริษัท แล้วตั้งชื่อผู้ใช้และรหัสผ่านของคุณเอง</p>' +
-        '<div class="row"><div class="field"><label for="rc">รหัสพนักงาน</label><input id="rc" required autocapitalize="characters"></div>' +
-        '<div class="field"><label for="rp">เบอร์โทร</label><input id="rp" type="tel" inputmode="tel" required></div></div>' +
-        '<div class="field"><label for="ru">ตั้งชื่อผู้ใช้ (a-z, 0-9)</label><input id="ru" autocomplete="username" autocapitalize="none" required minlength="3"></div>' +
-        '<div class="row"><div class="field"><label for="rw">ตั้งรหัสผ่าน</label><input id="rw" type="password" autocomplete="new-password" required minlength="6"></div>' +
-        '<div class="field"><label for="rw2">ยืนยันรหัสผ่าน</label><input id="rw2" type="password" autocomplete="new-password" required minlength="6"></div></div>' +
-        '<div id="lerr"></div><button class="btn primary block" type="submit">ลงทะเบียนและเข้าสู่ระบบ</button></form>') +
-    (A.REMOTE ? '' : '<div class="demo-hint">โหมดทดลอง · เข้าด้วย <code>demo</code> / <code>demo1234</code><br>ลองลงทะเบียน: รหัส <code>TESR-D05</code> เบอร์ <code>0800000005</code></div>') +
-    '</div></div>';
+function showLogin(msg) {
+  root.innerHTML = '<div class="login-wrap"><form class="login-card" id="lf">' +
+    '<div class="login-brand"><span class="logo lg" role="img" aria-label="TESR"></span><div><b>Time Clock</b><small>Thai Embedded System and Robotics · ลงเวลาเข้า–ออกงาน</small></div></div>' +
+    '<div class="field"><label for="u">อีเมล</label><input id="u" type="email" autocomplete="username" autocapitalize="none" inputmode="email" required></div>' +
+    '<div class="field"><label for="p">รหัสผ่าน</label><input id="p" type="password" autocomplete="current-password" required></div>' +
+    '<p class="small muted">ครั้งแรกใช้รหัสผ่านเป็นเบอร์โทรศัพท์ที่ให้ไว้กับบริษัท (เช่น 0891234567) เปลี่ยนเองได้ที่หน้าโปรไฟล์</p>' +
+    '<div id="lerr"></div><button class="btn primary block" type="submit">เข้าสู่ระบบ</button>' +
+    (A.REMOTE ? '' : '<div class="demo-hint">โหมดทดลอง · <code>somchai@example.com</code> / <code>0800000001</code></div>') +
+    '</form></div>';
   if (msg) document.getElementById('lerr').innerHTML = '<div class="err">' + esc(msg) + '</div>';
-  root.querySelectorAll('[data-tab]').forEach(function (b) { b.onclick = function () { showLogin('', b.dataset.tab); }; });
-  var f = document.getElementById('lf') || document.getElementById('rf');
+  var f = document.getElementById('lf');
   f.onsubmit = function (ev) {
     ev.preventDefault();
     var btn = f.querySelector('button[type=submit]'); btn.disabled = true;
-    var g = function (id) { return document.getElementById(id).value; };
-    var req;
-    if (f.id === 'lf') req = api('login', { as: 'emp', username: g('u'), password: g('p') });
-    else {
-      if (g('rw') !== g('rw2')) { document.getElementById('lerr').innerHTML = '<div class="err">รหัสผ่านทั้งสองช่องไม่ตรงกัน</div>'; btn.disabled = false; return; }
-      req = api('register', { code: g('rc'), phone: g('rp'), username: g('ru'), password: g('rw') });
-    }
-    req.then(function (r) { A.store.set(TOKEN, r.token); start(); })
+    api('login', { as: 'emp', username: document.getElementById('u').value, password: document.getElementById('p').value })
+      .then(function (r) { A.store.set(TOKEN, r.token); start(); })
       .catch(function (e) { document.getElementById('lerr').innerHTML = '<div class="err">' + esc(e.message) + '</div>'; btn.disabled = false; });
   };
 }
@@ -79,7 +62,7 @@ function start() {
 }
 function shell() {
   var tabs = [['home', 'หน้าแรก', 'home'], ['cal', 'ปฏิทิน', 'cal'], ['leave', 'การลา', 'leave'], ['me', 'โปรไฟล์', 'user']];
-  root.innerHTML = '<header class="emp-top"><div class="emp-top-in"><div class="mark">TESR</div><b>Time Clock</b><span class="small" style="margin-left:auto;color:var(--ink-muted)">' + esc(ME.settings.company) + '</span></div></header>' +
+  root.innerHTML = '<header class="emp-top"><div class="emp-top-in"><span class="logo" role="img" aria-label="TESR"></span><b>Time Clock</b><span class="small" style="margin-left:auto;color:var(--ink-muted)">' + esc(ME.settings.company) + '</span></div></header>' +
     '<main class="emp-main" id="view"></main>' +
     '<nav class="tabbar" aria-label="เมนู"><div class="tabbar-in">' + tabs.map(function (t) {
       return '<button data-go="' + t[0] + '">' + A.ICON[t[2]] + t[1] + (t[0] === 'leave' && ME.pending ? '<span class="badge">' + ME.pending + '</span>' : '') + '</button>';
@@ -284,11 +267,12 @@ function vMe(el) {
     '<label for="ph" style="cursor:pointer">' + A.avatar(e, 'lg') + '</label><input id="ph" type="file" accept="image/*" hidden>' +
     '<div><h2 style="font-size:20px">' + esc(e.name) + '</h2><div class="muted small">' + esc(e.position || '') + ' · ' + esc(ME.settings.company) + '</div></div>' +
     '<label for="ph" class="btn ghost sm">เปลี่ยนรูปโปรไฟล์</label></div>' +
-    '<div class="card pad"><dl class="kv"><dt>รหัสพนักงาน</dt><dd class="mono">' + esc(e.code) + '</dd><dt>ชื่อผู้ใช้</dt><dd class="mono">' + esc(ME.username) + '</dd>' +
-    '<dt>อีเมล</dt><dd>' + esc(e.email || '—') + '</dd><dt>เบอร์โทร</dt><dd class="mono">' + esc(e.phone || '—') + '</dd></dl>' +
+    '<div class="card pad"><dl class="kv"><dt>รหัสพนักงาน</dt><dd class="mono">' + esc(e.code) + '</dd><dt>อีเมลเข้าระบบ</dt><dd>' + esc(ME.username) + '</dd>' +
+    '<dt>เวลางาน</dt><dd>' + esc(ME.schedule) + '</dd><dt>เบอร์โทร</dt><dd class="mono">' + esc(e.phone || '—') + '</dd></dl>' +
     '<p class="small muted" style="margin-top:10px">ข้อมูลไม่ถูกต้อง แจ้งแอดมินเพื่อแก้ไข</p></div>' +
     '<form class="card pad stack" id="pwf"><h3 style="font-size:16px">เปลี่ยนรหัสผ่าน</h3>' +
-    '<div class="field"><label for="po">รหัสผ่านเดิม</label><input id="po" type="password" autocomplete="current-password" required></div>' +
+    (ME.customPw ? '' : '<p class="note">ตอนนี้รหัสผ่านของคุณคือเบอร์โทรศัพท์ แนะนำให้ตั้งรหัสใหม่ที่คนอื่นเดาไม่ได้</p>') +
+    '<div class="field"><label for="po">รหัสผ่านเดิม' + (ME.customPw ? '' : ' (เบอร์โทร)') + '</label><input id="po" type="password" autocomplete="current-password" required></div>' +
     '<div class="row"><div class="field"><label for="pn">รหัสผ่านใหม่</label><input id="pn" type="password" autocomplete="new-password" minlength="6" required></div>' +
     '<div class="field"><label for="pn2">ยืนยัน</label><input id="pn2" type="password" autocomplete="new-password" minlength="6" required></div></div>' +
     '<div id="pwe"></div><button class="btn ghost" type="submit">บันทึกรหัสผ่านใหม่</button></form>' +
@@ -303,7 +287,7 @@ function vMe(el) {
     var n = document.getElementById('pn').value;
     if (n !== document.getElementById('pn2').value) { document.getElementById('pwe').innerHTML = '<div class="err">รหัสผ่านใหม่ทั้งสองช่องไม่ตรงกัน</div>'; return; }
     api('changePassword', { old: document.getElementById('po').value, password: n })
-      .then(function (r) { A.store.set(TOKEN, r.token); A.toast('เปลี่ยนรหัสผ่านแล้ว'); ev.target.reset(); document.getElementById('pwe').innerHTML = ''; })
+      .then(function (r) { A.store.set(TOKEN, r.token); ME.customPw = true; A.toast('เปลี่ยนรหัสผ่านแล้ว'); vMe(el); })
       .catch(function (e) { document.getElementById('pwe').innerHTML = '<div class="err">' + esc(e.message) + '</div>'; });
   };
   document.getElementById('lo').onclick = function () { logout(); };

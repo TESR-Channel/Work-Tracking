@@ -31,11 +31,11 @@ try { var h = location.hash.replace('#', ''); if (/^(today|req|cal|report|emps|h
 /* ================= login ================= */
 function showLogin(msg) {
   root.innerHTML = '<div class="login-wrap"><form class="login-card" id="lf">' +
-    '<div class="login-brand"><div class="mark">TESR</div><div><b>Time Clock Admin</b><small>สำหรับผู้ดูแลระบบเท่านั้น</small></div></div>' +
-    '<div class="field"><label for="u">ชื่อผู้ใช้แอดมิน</label><input id="u" autocomplete="username" autocapitalize="none" required></div>' +
+    '<div class="login-brand"><span class="logo lg" role="img" aria-label="TESR"></span><div><b>Time Clock Admin</b><small>สำหรับผู้ดูแลระบบเท่านั้น</small></div></div>' +
+    '<div class="field"><label for="u">อีเมล / ชื่อผู้ใช้แอดมิน</label><input id="u" autocomplete="username" autocapitalize="none" required></div>' +
     '<div class="field"><label for="p">รหัสผ่าน</label><input id="p" type="password" autocomplete="current-password" required></div>' +
     '<div id="lerr"></div><button class="btn primary block" type="submit">เข้าสู่ระบบแอดมิน</button>' +
-    (A.REMOTE ? '' : '<div class="demo-hint">โหมดทดลอง · <code>admin</code> / <code>tesr1234</code></div>') +
+    (A.REMOTE ? '' : '<div class="demo-hint">โหมดทดลอง · <code>admin</code> / <code>tesr1234</code><br>พนักงานทดลอง · <code>somchai@example.com</code> / <code>0800000001</code></div>') +
     '<a href="index.html" class="small" style="text-align:center">ไปหน้าลงเวลาสำหรับพนักงาน</a></form></div>';
   if (msg) document.getElementById('lerr').innerHTML = '<div class="err">' + esc(msg) + '</div>';
   document.getElementById('lf').onsubmit = function (ev) {
@@ -59,7 +59,7 @@ function start() {
   }).catch(function (e) { if (e.code !== 'AUTH') showLogin(e.message); });
 }
 function shell() {
-  root.innerHTML = '<div class="adm"><aside class="side"><div class="brand"><div class="mark">TESR</div><div><b>Time Clock</b><small>Admin console</small></div></div>' +
+  root.innerHTML = '<div class="adm"><aside class="side"><div class="brand"><span class="logo" role="img" aria-label="TESR"></span><div><b>Time Clock</b><small>Admin console</small></div></div>' +
     '<nav aria-label="เมนูแอดมิน">' + NAV.map(function (n) { return '<button data-p="' + n[0] + '">' + A.ICON[n[2]] + '<span>' + n[1] + '</span>' + (n[0] === 'req' ? '<span class="cnt" id="reqCnt" hidden></span>' : '') + '</button>'; }).join('') + '</nav>' +
     '<div class="foot"><span>เข้าสู่ระบบเป็น <b style="color:var(--gold)">' + esc(INFO.adminUser) + '</b></span><button id="lo">ออกจากระบบ</button><a href="index.html" style="color:var(--ink-muted)">หน้าพนักงาน ↗</a></div></aside>' +
     '<main class="main" id="main"></main></div>';
@@ -281,19 +281,19 @@ function pReport(el, banner) {
 function pEmps(el, banner) {
   return api('employees').then(function (list) {
     var shown = list.filter(function (e) { return st.showInactive || e.active; });
-    el.innerHTML = banner + head('พนักงาน', list.filter(function (e) { return e.active; }).length + ' คนที่ใช้งานอยู่ · พนักงานลงทะเบียนเองด้วยรหัสพนักงาน + เบอร์โทร',
+    el.innerHTML = banner + head('พนักงาน', list.filter(function (e) { return e.active; }).length + ' คนที่ใช้งานอยู่ · พนักงานเข้าระบบด้วยอีเมล · รหัสผ่านเริ่มต้นคือเบอร์โทร',
       '<div class="hrow"><label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="inact"' + (st.showInactive ? ' checked' : '') + '> แสดงคนที่ปิดใช้งาน</label><button class="btn ghost sm" id="imp">นำเข้าจาก CSV</button><button class="btn primary sm" id="add">เพิ่มพนักงาน</button></div>') +
-      '<div class="card tbl-wrap"><table><thead><tr><th>พนักงาน</th><th>ติดต่อ</th><th>บัญชีเข้าระบบ</th><th>เวลางาน</th><th class="r">ลากิจ</th><th class="r">ลาป่วย</th><th class="r">พักร้อน</th><th class="r"></th></tr></thead><tbody>' +
+      '<div class="card tbl-wrap"><table><thead><tr><th>พนักงาน</th><th>ติดต่อ</th><th>เข้าระบบ (อีเมล)</th><th>เวลางาน</th><th class="r">ลากิจ</th><th class="r">ลาป่วย</th><th class="r">พักร้อน</th><th class="r"></th></tr></thead><tbody>' +
       (shown.map(function (e) {
         var u = e.usage, q = function (t) { var x = u[t]; return '<span class="num">' + A.fmtDays(x.used) + '</span><span class="muted">/' + x.quota + '</span>'; };
         return '<tr' + (e.active ? '' : ' style="opacity:.55"') + '><td>' + A.person(e) + '</td><td class="small"><div class="mono">' + esc(e.phone || '—') + '</div><div class="muted">' + esc(e.email || '') + '</div></td>' +
-          '<td>' + (e.username ? '<span class="mono">' + esc(e.username) + '</span>' : A.pill('pending', 'ยังไม่ลงทะเบียน')) + '</td>' +
+          '<td class="small">' + (e.username ? esc(e.username) + '<div>' + (e.customPw ? A.pill('ok', 'ตั้งรหัสเองแล้ว') : A.pill('pending', 'รหัส = เบอร์โทร')) + '</div>' : A.pill('bad', 'ยังไม่มีอีเมล')) + '</td>' +
           '<td class="small" style="white-space:nowrap">' + (e.custom ? '<b>' + esc(e.schedule) + '</b>' : '<span class="muted">' + esc(e.schedule) + '</span>') + '</td>' +
           '<td class="r">' + q('personal') + '</td><td class="r">' + q('sick') + '</td><td class="r">' + q('vacation') + '</td>' +
           '<td class="r" style="white-space:nowrap"><button class="btn ghost sm" data-edit="' + e.id + '">แก้ไข</button> ' +
-          (e.active ? (e.username ? '<button class="btn ghost sm" data-reset="' + e.id + '">รีเซ็ตบัญชี</button> ' : '') + '<button class="btn ghost sm" data-del="' + e.id + '">ปิดใช้งาน</button>' : '<button class="btn ghost sm" data-restore="' + e.id + '">เปิดใช้งาน</button>') + '</td></tr>';
+          (e.active ? (e.customPw ? '<button class="btn ghost sm" data-reset="' + e.id + '">รีเซ็ตรหัส</button> ' : '') + '<button class="btn ghost sm" data-del="' + e.id + '">ปิดใช้งาน</button>' : '<button class="btn ghost sm" data-restore="' + e.id + '">เปิดใช้งาน</button>') + '</td></tr>';
       }).join('') || '<tr><td colspan="8" class="empty">ยังไม่มีพนักงาน · กด "เพิ่มพนักงาน" หรือ "นำเข้าจาก CSV"</td></tr>') + '</tbody></table></div>' +
-      '<p class="small muted">รีเซ็ตบัญชีจะล้างชื่อผู้ใช้และรหัสผ่าน ให้พนักงานลงทะเบียนใหม่ด้วยรหัสพนักงาน + เบอร์โทร · รหัสผ่านเก็บแบบเข้ารหัส แอดมินจึงดูรหัสผ่านไม่ได้ · ปิดใช้งานแล้วประวัติเดิมยังอยู่ในรายงาน</p>';
+      '<p class="small muted">ชื่อผู้ใช้คืออีเมล รหัสผ่านเริ่มต้นคือเบอร์โทร · ถ้าพนักงานตั้งรหัสเองแล้วลืม กด "รีเซ็ตรหัส" รหัสจะกลับเป็นเบอร์โทร · รหัสที่ตั้งเองเก็บแบบเข้ารหัส แอดมินดูไม่ได้ · ปิดใช้งานแล้วประวัติเดิมยังอยู่ในรายงาน</p>';
     document.getElementById('inact').onchange = function (ev) { st.showInactive = ev.target.checked; go('emps'); };
     document.getElementById('add').onclick = function () { empForm(null); };
     document.getElementById('imp').onclick = importForm;
@@ -307,7 +307,7 @@ function pEmps(el, banner) {
         };
       });
     };
-    two('[data-reset]', 'resetLogin', 'ยืนยันรีเซ็ต', 'รีเซ็ตบัญชีแล้ว ให้พนักงานลงทะเบียนใหม่');
+    two('[data-reset]', 'resetLogin', 'ยืนยันรีเซ็ต', 'รีเซ็ตแล้ว รหัสผ่านกลับเป็นเบอร์โทร');
     two('[data-del]', 'delEmp', 'ยืนยันปิดใช้งาน', 'ปิดใช้งานแล้ว');
     el.querySelectorAll('[data-restore]').forEach(function (b) { b.onclick = function () { api('restoreEmp', { id: b.dataset.restore }).then(function () { A.toast('เปิดใช้งานแล้ว'); go('emps'); }).catch(function (e) { A.toast(e.message); }); }; });
   });
@@ -318,7 +318,7 @@ function empForm(e) {
   A.modal('<div class="sheet-h"><h3>' + (e.id ? 'แก้ไขข้อมูลพนักงาน' : 'เพิ่มพนักงาน') + '</h3><button class="x" data-close aria-label="ปิด">×</button></div><form class="sheet-b" id="ef">' +
     '<div class="row">' + f('fc', 'รหัสพนักงาน', e.code, 'required') + f('fn', 'ชื่อ–นามสกุล', e.name, 'required') + '</div>' +
     '<div class="row"><div class="field"><label for="fg">เพศ</label><select id="fg"><option value="">—</option><option value="Male"' + (e.gender === 'Male' ? ' selected' : '') + '>ชาย</option><option value="Female"' + (e.gender === 'Female' ? ' selected' : '') + '>หญิง</option></select></div>' + f('fp', 'ตำแหน่ง', e.position) + '</div>' +
-    '<div class="row">' + f('fph', 'เบอร์โทร (ใช้ยืนยันตอนลงทะเบียน)', e.phone, 'type="tel" required') + f('fe', 'อีเมล', e.email, 'type="email"') + '</div>' +
+    '<div class="row">' + f('fe', 'อีเมล (ใช้เป็นชื่อผู้ใช้)', e.email, 'type="email" required') + f('fph', 'เบอร์โทร (รหัสผ่านเริ่มต้น)', e.phone, 'type="tel" required') + '</div>' +
     '<div class="field"><span class="lbl">เวลางานของคนนี้ · เว้นว่าง = ใช้เวลางานบริษัท ' + esc(INFO.settings.start) + '–' + esc(INFO.settings.end) + '</span><div class="row">' +
     f('fs1', 'เวลาเข้างาน', e.shiftStart, 'type="time"') + f('fs2', 'เวลาเลิกงาน', e.shiftEnd, 'type="time"') + '</div></div>' +
     '<div class="field"><span class="lbl">วันทำงานของคนนี้ · ไม่ติ๊กเลย = ใช้วันทำงานบริษัท (' + esc(TC.util.daysText(INFO.settings.workdays)) + ')</span><div class="days-pick" id="fwd">' + [1, 2, 3, 4, 5, 6, 0].map(function (i) { var cur = TC.util.parseDays(e.workdays) || []; return '<label><input type="checkbox" value="' + i + '"' + (cur.indexOf(i) >= 0 ? ' checked' : '') + '> ' + A.TH_D[i] + '</label>'; }).join('') + '</div></div>' +
@@ -390,13 +390,13 @@ function pSet(el, banner) {
       '<div id="serr"></div><button class="btn primary" type="submit">บันทึกการตั้งค่า</button></form>' +
       '<div class="stack"><div class="card pad stack"><h3 style="font-size:16px">QR Code ประจำวัน</h3><p class="small muted">เปิดบนแท็บเล็ตหน้าออฟฟิศ หรือพิมพ์ติดทุกเช้า · รหัสเปลี่ยนทุกวัน ถ่ายรูปไปใช้วันอื่นไม่ได้ · ต้องอยู่ในรัศมี ' + TC.util.fmtDist(o.radius) + '</p>' +
       '<div class="qrbox"><div id="qr"></div></div><div class="small muted mono" style="text-align:center">' + A.thDate(qr.date, 'year') + ' · ' + esc(qr.token) + '</div><button class="btn gold" id="full">เปิดโหมดแสดง QR เต็มจอ</button></div>' +
-      '<form class="card pad stack" id="af"><h3 style="font-size:16px">บัญชีแอดมิน</h3>' + f('a1', 'ชื่อผู้ใช้แอดมิน', INFO.adminUser, 'autocomplete="username" autocapitalize="none" required') +
+      '<form class="card pad stack" id="af"><h3 style="font-size:16px">บัญชีแอดมิน</h3>' + f('a1', 'อีเมล / ชื่อผู้ใช้แอดมิน', INFO.adminUser, 'autocomplete="username" autocapitalize="none" required') +
       f('a2', 'รหัสผ่านปัจจุบัน', '', 'type="password" autocomplete="current-password" required') + '<div class="row">' + f('a3', 'รหัสผ่านใหม่', '', 'type="password" autocomplete="new-password" minlength="6" required') + f('a4', 'ยืนยัน', '', 'type="password" autocomplete="new-password" minlength="6" required') + '</div>' +
       '<div id="aerr"></div><button class="btn ghost" type="submit">เปลี่ยนบัญชีแอดมิน</button></form></div></div>';
     var drawQr = function (box, size) { box.innerHTML = ''; try { new QRCode(box, { text: qr.payload, width: size, height: size, colorDark: '#0d0b0a', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M }); } catch (e) { box.textContent = 'สร้าง QR ไม่สำเร็จ'; } };
     drawQr(document.getElementById('qr'), 220);
     document.getElementById('full').onclick = function () {
-      A.modal('<div class="sheet-b" style="align-items:center;text-align:center;padding:24px"><div class="login-brand" style="justify-content:center"><div class="mark">TESR</div><div style="text-align:left"><b>สแกนเพื่อลงเวลา</b><small>' + esc(o.office) + '</small></div></div><div class="qrbox" id="qrbig"></div><b style="font-family:var(--f-display);font-size:20px">' + A.thDate(qr.date, 'long') + '</b><p class="small muted">เปิดกล้องมือถือหรือแอป TESR Time Clock แล้วสแกน</p><button class="btn ghost" data-close>ปิด</button></div>', 'wide');
+      A.modal('<div class="sheet-b" style="align-items:center;text-align:center;padding:24px"><div class="login-brand" style="justify-content:center"><span class="logo" role="img" aria-label="TESR"></span><div style="text-align:left"><b>สแกนเพื่อลงเวลา</b><small>' + esc(o.office) + '</small></div></div><div class="qrbox" id="qrbig"></div><b style="font-family:var(--f-display);font-size:20px">' + A.thDate(qr.date, 'long') + '</b><p class="small muted">เปิดกล้องมือถือหรือแอป TESR Time Clock แล้วสแกน</p><button class="btn ghost" data-close>ปิด</button></div>', 'wide');
       drawQr(document.getElementById('qrbig'), Math.min(420, window.innerWidth - 120));
       try { var el2 = document.querySelector('#modal .sheet'); if (el2.requestFullscreen) el2.requestFullscreen().catch(function () {}); } catch (e) {}
     };
