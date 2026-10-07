@@ -73,10 +73,9 @@ function shell() {
     }).join('') + '</div></nav>';
   root.querySelectorAll('[data-go]').forEach(function (b) { b.onclick = function () { go(b.dataset.go); }; });
 }
-A.onFresh(function (action, d) {
+A.onFresh(function () {
   if (!ME || !document.getElementById('view') || !A.idle()) return;
-  if (action === 'me') { ME = d; shell(); }
-  MONTHS = {}; REQS = null; go(view, true);
+  api('me').then(function (d) { ME = d; MONTHS = {}; REQS = null; shell(); go(view, true); }).catch(function () {});
 });
 function go(v, keep) {
   view = v;
@@ -136,7 +135,7 @@ function dayRow(x) {
 function vCal(el) {
   el.innerHTML = '<div class="card pad stack"><div class="cal-nav">' + A.monthPicker('emp', calMonth) + '</div>' +
     '<div class="cal" id="cal"><div class="loading" style="grid-column:1/-1">กำลังโหลด…</div></div>' +
-    '<div class="legend"><span><i class="dot ok"></i>มา</span><span><i class="dot late"></i>สาย</span><span><i class="dot absent"></i>ขาด</span><span><i class="dot leave"></i>ลา</span><span><i class="dot req"></i>ลารออนุมัติ</span><span><i class="dot holiday"></i>วันหยุด</span></div></div>' +
+    '<div class="legend tags"><span><b class="tg ok">มา</b>ตรงเวลา</span><span><b class="tg late">สาย</b>มาสาย</span><span><b class="tg early">ออกก่อน</b>ออกก่อนเวลา</span><span><b class="tg absent">ขาด</b>ไม่มา ไม่ได้ลา</span><span><b class="tg absent">ลืมออก</b>ไม่ได้เช็คเอาท์</span><span><b class="tg leave">ลา</b>ลาที่อนุมัติแล้ว</span><span><b class="tg req">รอ</b>ลารออนุมัติ</span><span><b class="tg hol">หยุด</b>วันหยุด</span></div></div>' +
     '<div class="card" id="dd"></div><div id="adjs"></div>';
   A.bindMonthPicker('emp', calMonth, function (m) { calMonth = m; selDay = null; vCal(el); });
   month(calMonth).then(function (d) {
@@ -144,11 +143,18 @@ function vCal(el) {
     if (!selDay || !by[selDay]) selDay = by[ME.today] ? ME.today : d.report.days[0].date;
     var draw = function () {
       document.getElementById('cal').innerHTML = A.calendar(calMonth, function (ds) {
-        var x = by[ds], dots = '';
-        if (x.st === 'ok' || x.st === 'late' || x.st === 'absent' || x.st === 'leave') dots += '<i class="dot ' + x.st + '"></i>';
-        if (x.leave && x.st !== 'leave') dots += '<i class="dot ' + (x.leave.status === 'approved' ? 'leave' : 'req') + '"></i>';
-        if (x.holiday) dots += '<i class="dot holiday"></i>';
-        return { html: '<button class="d' + (ds === ME.today ? ' today' : '') + (ds === selDay ? ' sel' : '') + (!x.work ? ' offday' : '') + '" data-d="' + ds + '"><span class="n">' + (+ds.slice(8)) + '</span><span class="dots">' + dots + '</span></button>' };
+        var x = by[ds], tags = [], f = x.flags || [], tg = function (c, t) { tags.push('<b class="tg ' + c + '">' + t + '</b>'); };
+        if (x.holiday) tg('hol', 'หยุด');
+        if (x.st === 'absent') tg('absent', 'ขาด');
+        else if (x.st === 'leave') tg('leave', 'ลา');
+        else if (x.rec) {
+          if (f.indexOf('noOut') >= 0) tg('absent', 'ลืมออก');
+          if (x.st === 'late') tg('late', 'สาย');
+          else if (f.indexOf('early') >= 0) tg('early', 'ออกก่อน');
+          else if (f.indexOf('noOut') < 0) tg('ok', 'มา');
+        }
+        if (x.leave && x.st !== 'leave') tg(x.leave.status === 'approved' ? 'leave' : 'req', x.leave.status === 'approved' ? 'ลา½' : 'รอ');
+        return { html: '<button class="d' + (ds === ME.today ? ' today' : '') + (ds === selDay ? ' sel' : '') + (!x.work ? ' offday' : '') + '" data-d="' + ds + '"><span class="n">' + (+ds.slice(8)) + '</span><span class="tags">' + tags.slice(0, 2).join('') + '</span></button>' };
       });
       document.querySelectorAll('#cal [data-d]').forEach(function (b) { b.onclick = function () { selDay = b.dataset.d; draw(); }; });
       dayDetail(by[selDay], d);
