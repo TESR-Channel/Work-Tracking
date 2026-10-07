@@ -91,6 +91,6 @@ var TCMock = (function () {
   return {
     adapter: adapter,
     reset: function () { db = seed(); save(); },
-    qrToken: function () { return adapter.hmac('qr|' + adapter.now().date).slice(0, 12); }
+    qrToken: function () { var s = load().settings || {}; return s.qrMode === 'daily' ? adapter.hmac('qr|' + adapter.now().date).slice(0, 12) : adapter.hmac('qr|static|' + (s.qrVer || '1')).slice(0, 12); }
   };
 })();
