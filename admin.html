@@ -92,7 +92,8 @@ function pToday(el, banner) {
     var rb = {}, lb = {};
     d.records.forEach(function (r) { rb[r.empId] = r; });
     d.leaves.forEach(function (l) { if (!lb[l.empId] || l.status === 'approved') lb[l.empId] = l; });
-    var rows = d.employees.map(function (e) { return { e: e, r: rb[e.id], l: lb[e.id] }; });
+    var rows = d.employees.map(function (e) { return { e: e, r: rb[e.id], l: lb[e.id], off: !e.workToday }; });
+    var offN = rows.filter(function (x) { return x.off && !x.r; }).length;
     var inN = rows.filter(function (x) { return x.r; }).length, late = rows.filter(function (x) { return x.r && x.r.lateMin > 0; }).length;
     var onLeave = rows.filter(function (x) { return !x.r && x.l && x.l.status === 'approved'; }).length;
     var pend = d.pending.leaves.length + d.pending.adjustments.length; setCount(pend);
@@ -100,6 +101,7 @@ function pToday(el, banner) {
       if (x.r) return x.r.lateMin > 0 ? A.pill('late', 'สาย ' + x.r.lateMin + ' น.') : A.pill('ok', 'ตรงเวลา');
       if (x.l && x.l.status === 'approved') return A.pill('leave', A.leaveLabel(x.l));
       if (d.holiday) return A.pill('holiday', 'วันหยุด');
+      if (x.off) return A.pill('off', 'ไม่ใช่วันทำงาน');
       return A.pill('bad', 'ยังไม่เข้างาน');
     };
     var pl = d.pending.leaves.slice(0, 5).map(function (l) {
@@ -109,9 +111,9 @@ function pToday(el, banner) {
     })).join('');
     var lv = d.leaves.map(function (l) { return '<li><div class="grow"><b>' + esc(l.name) + '</b><div class="small muted">' + esc(A.leaveLabel(l)) + ' · ' + esc(l.reason) + '</div></div>' + A.reqPill(l.status) + '</li>'; }).join('');
     el.innerHTML = banner + head('ภาพรวมวันนี้', A.thDate(d.today, 'long') + (d.holiday ? ' · วันหยุด: ' + esc(d.holiday) : '') + ' · อัปเดต ' + esc(d.now) + ' น.', '<button class="btn ghost sm" id="rf">รีเฟรช</button>') +
-      '<div class="kpis num"><div class="card kpi k-ok"><span>เข้างานแล้ว</span><b>' + inN + '<small class="muted" style="font-size:15px"> / ' + rows.length + '</small></b></div>' +
+      '<div class="kpis num"><div class="card kpi k-ok"><span>เข้างานแล้ว</span><b>' + inN + '<small class="muted" style="font-size:15px"> / ' + (rows.length - offN) + '</small></b></div>' +
       '<div class="card kpi k-late"><span>มาสายวันนี้</span><b>' + late + '</b></div><div class="card kpi k-leave"><span>ลาวันนี้</span><b>' + onLeave + '</b></div>' +
-      '<div class="card kpi k-bad"><span>ยังไม่เข้างาน</span><b>' + (rows.length - inN - onLeave) + '</b></div><div class="card kpi k-req"><span>คำขอรออนุมัติ</span><b>' + pend + '</b></div></div>' +
+      '<div class="card kpi k-bad"><span>ยังไม่เข้างาน</span><b>' + Math.max(0, rows.length - inN - onLeave - offN) + '</b></div><div class="card kpi k-req"><span>คำขอรออนุมัติ</span><b>' + pend + '</b></div></div>' +
       '<div class="grid-2"><div class="card tbl-wrap"><table><thead><tr><th>พนักงาน</th><th>สถานะ</th><th class="r">เข้างาน</th><th class="r">ออกงาน</th><th class="r">ระยะตอนสแกน</th></tr></thead><tbody>' +
       (rows.map(function (x) {
         return '<tr><td>' + A.person(x.e) + '</td><td>' + status(x) + '</td><td class="r num mono">' + (x.r ? esc(x.r.in) : '—') + '</td><td class="r num mono">' + (x.r && x.r.out ? esc(x.r.out) : '—') + '</td><td class="r num">' + (x.r && x.r.inDist !== null ? TC.util.fmtDist(x.r.inDist) : '—') + '</td></tr>';
@@ -181,7 +183,7 @@ function pCal(el, banner) {
       var list = byDay[ds], chips = '', work = d.settings.workdays.indexOf(TC.util.dow(ds)) >= 0 && !hol[ds];
       if (hol[ds]) chips += '<div class="chip hol">' + esc(hol[ds]) + '</div>';
       list.forEach(function (o) {
-        var l = o.x.leave; if (!l || !work) return;
+        var l = o.x.leave; if (!l || !o.x.work) return;
         chips += '<div class="chip ' + (l.status === 'approved' ? 'leave' : 'req') + '" title="' + esc(o.e.name + ' · ' + A.leaveLabel(l) + ' · ' + l.reason) + '">' + esc(o.e.name.split(' ')[0]) + ' · ' + esc(TC.LEAVE_TYPES[l.type].replace('ลา', '')) + (l.part !== 'full' ? ' ½' : '') + '</div>';
       });
       var late = list.filter(function (o) { return o.x.st === 'late'; }).length, abs = list.filter(function (o) { return o.x.st === 'absent'; }).length;
@@ -286,7 +288,7 @@ function pEmps(el, banner) {
         var u = e.usage, q = function (t) { var x = u[t]; return '<span class="num">' + A.fmtDays(x.used) + '</span><span class="muted">/' + x.quota + '</span>'; };
         return '<tr' + (e.active ? '' : ' style="opacity:.55"') + '><td>' + A.person(e) + '</td><td class="small"><div class="mono">' + esc(e.phone || '—') + '</div><div class="muted">' + esc(e.email || '') + '</div></td>' +
           '<td>' + (e.username ? '<span class="mono">' + esc(e.username) + '</span>' : A.pill('pending', 'ยังไม่ลงทะเบียน')) + '</td>' +
-          '<td class="mono small">' + (e.shiftStart || e.shiftEnd ? '<b>' + esc(e.shiftStart || INFO.settings.start) + '–' + esc(e.shiftEnd || INFO.settings.end) + '</b>' : '<span class="muted">' + esc(INFO.settings.start) + '–' + esc(INFO.settings.end) + '</span>') + '</td>' +
+          '<td class="small" style="white-space:nowrap">' + (e.custom ? '<b>' + esc(e.schedule) + '</b>' : '<span class="muted">' + esc(e.schedule) + '</span>') + '</td>' +
           '<td class="r">' + q('personal') + '</td><td class="r">' + q('sick') + '</td><td class="r">' + q('vacation') + '</td>' +
           '<td class="r" style="white-space:nowrap"><button class="btn ghost sm" data-edit="' + e.id + '">แก้ไข</button> ' +
           (e.active ? (e.username ? '<button class="btn ghost sm" data-reset="' + e.id + '">รีเซ็ตบัญชี</button> ' : '') + '<button class="btn ghost sm" data-del="' + e.id + '">ปิดใช้งาน</button>' : '<button class="btn ghost sm" data-restore="' + e.id + '">เปิดใช้งาน</button>') + '</td></tr>';
@@ -319,6 +321,8 @@ function empForm(e) {
     '<div class="row">' + f('fph', 'เบอร์โทร (ใช้ยืนยันตอนลงทะเบียน)', e.phone, 'type="tel" required') + f('fe', 'อีเมล', e.email, 'type="email"') + '</div>' +
     '<div class="field"><span class="lbl">เวลางานของคนนี้ · เว้นว่าง = ใช้เวลางานบริษัท ' + esc(INFO.settings.start) + '–' + esc(INFO.settings.end) + '</span><div class="row">' +
     f('fs1', 'เวลาเข้างาน', e.shiftStart, 'type="time"') + f('fs2', 'เวลาเลิกงาน', e.shiftEnd, 'type="time"') + '</div></div>' +
+    '<div class="field"><span class="lbl">วันทำงานของคนนี้ · ไม่ติ๊กเลย = ใช้วันทำงานบริษัท (' + esc(TC.util.daysText(INFO.settings.workdays)) + ')</span><div class="days-pick" id="fwd">' + [1, 2, 3, 4, 5, 6, 0].map(function (i) { var cur = TC.util.parseDays(e.workdays) || []; return '<label><input type="checkbox" value="' + i + '"' + (cur.indexOf(i) >= 0 ? ' checked' : '') + '> ' + A.TH_D[i] + '</label>'; }).join('') + '</div></div>' +
+    '<div class="field"><span class="lbl">เวลางานวันเสาร์ (ถ้าต่างจากวันปกติ เช่น เลิก 16:00)</span><div class="row">' + f('fs3', 'เข้างานวันเสาร์', e.satStart, 'type="time"') + f('fs4', 'เลิกงานวันเสาร์', e.satEnd, 'type="time"') + '</div></div>' +
     '<div class="field"><span class="lbl">สิทธิ์ลาต่อปี (วัน) · เว้นว่าง = ใช้ค่าเริ่มต้นของบริษัท</span><div class="row">' +
     f('q1', 'ลากิจ', e.qPersonal, 'type="number" min="0" step="0.5" placeholder="' + INFO.settings.qPersonal + '"') + f('q2', 'ลาป่วย', e.qSick, 'type="number" min="0" step="0.5" placeholder="' + INFO.settings.qSick + '"') +
     f('q3', 'ลาพักร้อน', e.qVacation, 'type="number" min="0" step="0.5" placeholder="' + INFO.settings.qVacation + '"') + f('q4', 'ลาคลอด', e.qMaternity, 'type="number" min="0" step="1" placeholder="' + INFO.settings.qMaternity + '"') + '</div></div>' +
@@ -326,11 +330,11 @@ function empForm(e) {
     '<div id="eerr"></div><button class="btn primary block" type="submit">บันทึก</button></form>', 'wide');
   document.getElementById('ef').onsubmit = function (ev) {
     ev.preventDefault(); var g = function (id) { return document.getElementById(id).value; };
-    api('saveEmp', { emp: { id: e.id, code: g('fc'), name: g('fn'), gender: g('fg'), position: g('fp'), phone: g('fph'), email: g('fe'), qPersonal: g('q1'), qSick: g('q2'), qVacation: g('q3'), qMaternity: g('q4'), note: g('fnote'), shiftStart: g('fs1'), shiftEnd: g('fs2') } })
+    api('saveEmp', { emp: { id: e.id, code: g('fc'), name: g('fn'), gender: g('fg'), position: g('fp'), phone: g('fph'), email: g('fe'), qPersonal: g('q1'), qSick: g('q2'), qVacation: g('q3'), qMaternity: g('q4'), note: g('fnote'), shiftStart: g('fs1'), shiftEnd: g('fs2'), satStart: g('fs3'), satEnd: g('fs4'), workdays: [].slice.call(document.querySelectorAll('#fwd input:checked')).map(function (i) { return i.value; }).join(',') } })
       .then(function () { A.closeModal(); A.toast('บันทึกแล้ว'); go('emps'); }).catch(function (x) { err('eerr', x); });
   };
 }
-var IMPORT_COLS = ['code', 'name', 'gender', 'email', 'phone', 'position', 'shiftStart', 'shiftEnd', 'qPersonal', 'qSick', 'qVacation', 'qMaternity'];
+var IMPORT_COLS = ['code', 'name', 'gender', 'email', 'phone', 'position', 'shiftStart', 'shiftEnd', 'workdays', 'satStart', 'satEnd', 'qPersonal', 'qSick', 'qVacation', 'qMaternity'];
 function importForm() {
   A.modal('<div class="sheet-h"><h3>นำเข้าพนักงานจาก CSV</h3><button class="x" data-close aria-label="ปิด">×</button></div><div class="sheet-b">' +
     '<p class="small muted">วางข้อมูลจาก Excel / Google Sheets หรือเลือกไฟล์ .csv · แถวแรกเป็นหัวตาราง คอลัมน์ที่รองรับ: <span class="mono">' + IMPORT_COLS.join(', ') + '</span> · รหัสที่มีอยู่แล้วจะถูกอัปเดต</p>' +
