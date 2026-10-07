@@ -428,6 +428,12 @@ var TC = (function () {
     });
   }
   var EMP_FIELDS = ['code', 'name', 'gender', 'email', 'phone', 'position', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note', 'shiftStart', 'shiftEnd', 'workdays', 'satStart', 'satEnd', 'dayTimes', 'startDate'];
+  /** วันทำงาน/เวลาที่เท่ากับค่ามาตรฐานบริษัท → เก็บเป็นค่าว่าง (ให้ตามค่ามาตรฐาน) */
+  function normSched(v, S) {
+    if (v.workdays && v.workdays === S.workdays.slice().sort().join(',')) v.workdays = '';
+    if (v.shiftStart === S.start && v.shiftEnd === S.end) { v.shiftStart = ''; v.shiftEnd = ''; }
+    return v;
+  }
   function cleanEmp(src) {
     var o = {};
     EMP_FIELDS.forEach(function (k) { if (src[k] !== undefined) o[k] = str(src[k]); });
@@ -446,7 +452,7 @@ var TC = (function () {
     return o;
   }
   function saveEmp(c) {
-    var v = cleanEmp(c.p.emp || {}), id = str((c.p.emp || {}).id), list = emps(c.A);
+    var v = normSched(cleanEmp(c.p.emp || {}), c.S), id = str((c.p.emp || {}).id), list = emps(c.A);
     if (!v.code || !v.name) throw E('ต้องกรอกรหัสพนักงานและชื่อ');
     var dup = list.filter(function (e) { return isActive(e) && e.id !== id && str(e.code).toLowerCase() === v.code.toLowerCase(); })[0];
     if (dup) throw E('รหัสพนักงาน ' + v.code + ' ซ้ำกับ ' + dup.name);
@@ -468,7 +474,7 @@ var TC = (function () {
   function importEmps(c) {
     var rows = c.p.rows || [], added = 0, updated = 0;
     rows.forEach(function (src) {
-      var v = cleanEmp(src); if (!v.code || !v.name) return;
+      var v = normSched(cleanEmp(src), c.S); if (!v.code || !v.name) return;
       var e = emps(c.A).filter(function (x) { return str(x.code).toLowerCase() === v.code.toLowerCase(); })[0];
       if (v.email) checkEmail(c, v.email, e ? e.id : '');
       if (e) { c.A.update(TABLES.EMP, e, merge(v, { active: 'TRUE' })); updated++; }
@@ -651,10 +657,49 @@ var TC = (function () {
     return { head1: head1, head2: head2, merges: merges, rows: rows };
   }
 
+  /* =================== sync: ส่งข้อมูลทั้งหมดที่ผู้ใช้มีสิทธิ์เห็นในครั้งเดียว =================== *
+   * หน้าเว็บเก็บข้อมูลชุดนี้ไว้ แล้วคำนวณหน้าต่างๆ เองในเครื่อง (ด้วยไฟล์ core.js เดียวกัน) จึงเปิดหน้าได้ทันที
+   * ไม่ส่งรหัสผ่าน/รหัสเครื่องจริงออกไป (ส่งแค่ว่า "มี" หรือ "ไม่มี") · พนักงานได้เฉพาะข้อมูลของตัวเอง */
+  var SYNC_DAYS = 400;
+  function strip(r) { var o = {}; for (var k in r) if (k !== '_row') o[k] = r[k]; return o; }
+  function maskEmp(e) { var o = strip(e); o.passHash = e.passHash ? 'set' : ''; o.deviceId = e.deviceId ? 'set' : ''; return o; }
+  function sync(c) {
+    var admin = c.sess.role === 'admin', me = admin ? null : myEmp(c), from = addDays(c.now.date, -SYNC_DAYS);
+    var mine = function (r) { return admin || r.empId === me.id; };
+    var raw = c.A.getSettings(), st = {};
+    if (admin) { for (var k in raw) if (k !== 'adminPassword') st[k] = raw[k]; st.adminHash = raw.adminHash ? 'set' : ''; }
+    else { PUBLIC_SETTINGS.forEach(function (k) { if (raw[k] !== undefined) st[k] = raw[k]; }); st.startDate = goLive(c); }
+    return {
+      role: c.sess.role, id: c.sess.id, ms: c.now.ms, from: from, settings: st,
+      tables: {
+        Employees: admin ? emps(c.A).map(maskEmp) : [maskEmp(me)],
+        Records: c.A.rows(TABLES.REC).filter(function (r) { return mine(r) && String(r.date) >= from; }).map(strip),
+        Leaves: c.A.rows(TABLES.LEAVE).filter(mine).map(strip),
+        Adjustments: c.A.rows(TABLES.ADJ).filter(mine).map(strip),
+        Holidays: c.A.rows(TABLES.HOL).map(strip)
+      },
+      qr: admin ? qr(c) : null
+    };
+  }
+  /** คำนวณคำสั่ง "อ่าน" ในเครื่องจากข้อมูล sync (ไม่ต้องรอเซิร์ฟเวอร์) */
+  var LOCAL = { me: 1, myMonth: 1, myRequests: 1, adminToday: 1, adminMonth: 1, requests: 1, employees: 1, holidays: 1, settings: 1 };
+  function local(A, p, role, id) {
+    try {
+      if (!LOCAL[p.action]) throw E('ต้องถามเซิร์ฟเวอร์');
+      var c = { A: A, p: p, now: A.now() }; c.S = settings(A);
+      c.sess = { role: role, id: id };
+      if (role === 'emp') { c.sess.emp = emps(A).filter(function (x) { return x.id === id; })[0]; if (!c.sess.emp) throw E('ไม่พบข้อมูลพนักงาน', 'AUTH'); }
+      var fn = role === 'admin' ? ADMIN[p.action] : EMP[p.action];
+      if (!fn) throw E('บัญชีนี้ไม่มีสิทธิ์ใช้งานส่วนนี้', 'FORBIDDEN');
+      return { ok: true, data: fn(c) };
+    } catch (e) { return { ok: false, error: e.message || String(e), code: e.code || '' }; }
+  }
+
   /* =================== router =================== */
   var PUBLIC = { login: login };
-  var EMP = { me: me, myMonth: myMonth, punch: punch, photo: photo, changePassword: changePassword, leaveCreate: leaveCreate, leaveCancel: leaveCancel, adjCreate: adjCreate, myRequests: myRequests };
+  var EMP = { me: me, myMonth: myMonth, punch: punch, photo: photo, changePassword: changePassword, leaveCreate: leaveCreate, leaveCancel: leaveCancel, adjCreate: adjCreate, myRequests: myRequests, sync: sync };
   var ADMIN = {
+    sync: sync,
     adminToday: adminToday, adminMonth: adminMonth, requests: requests, decide: decide, employees: employees, saveEmp: saveEmp,
     importEmps: importEmps, delEmp: delEmp, restoreEmp: restoreEmp, resetLogin: resetLogin, resetDevice: resetDevice, selfie: selfie, holidays: listHolidays, saveHoliday: saveHoliday,
     delHoliday: delHoliday, saveSettings: saveSettings, changeAdmin: changeAdmin, qr: qr, rotateQr: rotateQr, editRecord: editRecord, buildMonth: buildMonth,
@@ -677,15 +722,17 @@ var TC = (function () {
   function handle(A, p) {
     p = p || {};
     try {
-      var data = WRITES[p.action] ? A.lock(function () { return run(A, p); }) : run(A, p);
-      return { ok: true, data: data };
+      var data = WRITES[p.action] ? A.lock(function () { return run(A, p); }) : run(A, p), out = { ok: true, data: data };
+      // คำสั่งที่เขียนข้อมูล: ส่งข้อมูลชุดใหม่กลับไปในคำตอบเดียวกัน หน้าเว็บจะได้ไม่ต้องโหลดซ้ำ
+      if (p.sync && WRITES[p.action]) { try { out.snap = { ok: true, data: run(A, { action: 'sync', token: (data && data.token) || p.token }) }; } catch (e2) {} }
+      return out;
     } catch (e) {
       return { ok: false, error: e.message || String(e), code: e.code || '' };
     }
   }
 
   return {
-    handle: handle, WRITES: WRITES, monthReport: monthReport, exportTable: exportTable, ADJ_WINDOW: ADJ_WINDOW, TABLES: TABLES, LEAVE_TYPES: LEAVE_TYPES, PART: PART, STATUS: STATUS,
+    handle: handle, local: local, LOCAL: LOCAL, WRITES: WRITES, monthReport: monthReport, exportTable: exportTable, ADJ_WINDOW: ADJ_WINDOW, TABLES: TABLES, LEAVE_TYPES: LEAVE_TYPES, PART: PART, STATUS: STATUS,
     DEFAULTS: DEFAULTS, util: { monthDays: monthDays, dow: dow, addDays: addDays, range: range, toMin: toMin, haversine: haversine, fmtDist: fmtDist, lateOf: lateOf, shiftOf: shiftOf, daysOf: daysOf, parseDays: parseDays, daysText: daysText, scheduleText: scheduleText, parseDayTimes: parseDayTimes, dayTimesText: dayTimesText, customSchedule: customSchedule, isDate: isDate, isTime: isTime }
   };
 })();
