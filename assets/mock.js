@@ -1,7 +1,7 @@
 /* TESR Time Clock — โหมดทดลอง: เก็บข้อมูลตัวอย่างในเบราว์เซอร์ ใช้ logic เดียวกับหลังบ้านจริง (core.js)
  * ข้อมูลในไฟล์นี้เป็นตัวอย่างสมมุติทั้งหมด ไม่ใช่ข้อมูลพนักงานจริง */
 var TCMock = (function () {
-  var KEY = 'tesr-tc-demo-v3', db = null, cache = {};
+  var KEY = 'tesr-tc-demo-v4', db = null, cache = {};
   function h(s) {
     var a = 0x811c9dc5, b = 0x9e3779b9;
     for (var i = 0; i < s.length; i++) { var c = s.charCodeAt(i); a = Math.imul(a ^ c, 16777619) >>> 0; b = Math.imul(b ^ c, 2246822519) >>> 0; }
@@ -14,14 +14,14 @@ var TCMock = (function () {
     var S = {}; for (var k in TC.DEFAULTS) S[k] = TC.DEFAULTS[k];
     var people = [
       ['TESR-D01', 'สมชาย ใจดี', 'Male', 'วิศวกร', 'demo', '0800000001', 'TRUE'],
-      ['TESR-D02', 'กมลวรรณ ศรีสุข', 'Female', 'เลขานุการ', 'kamon', '0800000002', ''],
+      ['TESR-D02', 'กมลวรรณ ศรีสุข', 'Female', 'เลขานุการ', 'kamon', '0800000002', '09:20'],
       ['TESR-D03', 'ธนพล วงศ์ทอง', 'Male', 'วิศวกร', 'thanapon', '0800000003', ''],
       ['TESR-D04', 'ปิยะนุช แก้วมณี', 'Female', 'ฝ่ายขาย', 'piyanuch', '0800000004', ''],
       ['TESR-D05', 'วีระพงษ์ บุญมา', 'Male', 'วิศวกร', '', '0800000005', '']
     ];
     var emps = people.map(function (p, i) {
       return { id: 'd' + (i + 1), code: p[0], name: p[1], gender: p[2], email: '', phone: p[5], position: p[3], photo: '', active: 'TRUE',
-        username: p[4], passHash: p[4] ? pw('demo1234') : '', qPersonal: '', qSick: '', qVacation: '', qMaternity: p[2] === 'Female' ? '90' : '', note: 'ตัวอย่าง' };
+        username: p[4], passHash: p[4] ? pw('demo1234') : '', qPersonal: '', qSick: '', qVacation: '', qMaternity: p[2] === 'Female' ? '90' : '', note: 'ตัวอย่าง', shiftStart: p[6] === '09:20' ? '09:20' : '', shiftEnd: p[6] === '09:20' ? '18:20' : '' };
     });
     var s = 11; function rnd() { s = (s * 9301 + 49297) % 233280; return s / 233280; }
     var now = new Date(), T = ymd(now), recs = [], start = TC.util.toMin(S.start);
@@ -32,13 +32,14 @@ var TCMock = (function () {
         var isT = k === T;
         if (!isT && rnd() < 0.05) return;
         if (isT && i === 4) return;
-        var m = start - 4 - Math.floor(rnd() * 20);
-        if (rnd() < (i === 3 ? 0.4 : i === 0 ? 0.22 : 0.1)) m = start + 1 + Math.floor(rnd() * 35);
+        var st0 = e.shiftStart ? TC.util.toMin(e.shiftStart) : start;
+        var m = st0 - 4 - Math.floor(rnd() * 20);
+        if (rnd() < (i === 3 ? 0.4 : i === 0 ? 0.22 : 0.1)) m = st0 + 1 + Math.floor(rnd() * 35);
         var o = isT ? null : 18 * 60 + Math.floor(rnd() * 70);
         if (!isT && rnd() < 0.03) o = null;
         var tin = pad(Math.floor(m / 60)) + ':' + pad(m % 60);
         recs.push({ date: k, empId: e.id, code: e.code, name: e.name, in: tin, out: o === null ? '' : pad(Math.floor(o / 60)) + ':' + pad(o % 60),
-          lateMin: String(Math.max(0, m - start)), inDist: String(Math.round(30 + rnd() * 250)), outDist: o === null ? '' : String(Math.round(30 + rnd() * 250)), note: '', updatedAt: '' });
+          lateMin: String(Math.max(0, m - st0)), inDist: String(Math.round(30 + rnd() * 250)), outDist: o === null ? '' : String(Math.round(30 + rnd() * 250)), note: '', updatedAt: '' });
       });
     }
     var add = function (n) { var x = new Date(now); x.setDate(x.getDate() + n); while (x.getDay() === 0 || x.getDay() === 6) x.setDate(x.getDate() + 1); return ymd(x); };

@@ -186,11 +186,11 @@ function writeMonthSheet_(m, rep, S, now) {
   if (sh) sh.clear(); else sh = ss.insertSheet(name);
 
   sh.getRange(1, 1).setValue('สรุปการทำงาน เดือน' + TH_MF[mo - 1] + ' ' + (y + 543) + ' · ' + S.company).setFontSize(14).setFontWeight('bold');
-  sh.getRange(2, 1).setValue('เวลาเข้างาน ' + S.start + (S.grace ? ' (ผ่อนผัน ' + S.grace + ' นาที)' : '') + ' · นับถึงวันที่ ' + today + ' · อัปเดต ' + now.iso.replace('T', ' ')).setFontColor('#6b625a');
+  sh.getRange(2, 1).setValue('เวลางานบริษัท ' + S.start + '–' + S.end + (S.grace ? ' (ผ่อนผัน ' + S.grace + ' นาที)' : '') + ' · คนที่มีเวลางานของตัวเองนับสายตามเวลาของคนนั้น · นับถึงวันที่ ' + today + ' · อัปเดต ' + now.iso.replace('T', ' ')).setFontColor('#6b625a');
 
-  const sumH = ['รหัส', 'ชื่อ', 'ตำแหน่ง', 'วันทำงาน', 'มาทำงาน', 'ขาด (วัน)', 'มาสาย (ครั้ง)', 'สายรวม (นาที)']
+  const sumH = ['รหัส', 'ชื่อ', 'ตำแหน่ง', 'เวลางาน', 'วันทำงาน', 'มาทำงาน', 'ขาด (วัน)', 'มาสาย (ครั้ง)', 'สายรวม (นาที)']
     .concat(types.map(t => LT[t] + ' (วัน)')).concat(['ลืมเช็คเอาท์', 'ชั่วโมงในออฟฟิศ']);
-  const sum = rep.map(r => [r.emp.code, r.emp.name, r.emp.position, r.t.workdays, r.t.present, r.t.absent, r.t.lateDays, r.t.lateMin]
+  const sum = rep.map(r => [r.emp.code, r.emp.name, r.emp.position, (r.emp.shiftStart || S.start) + '–' + (r.emp.shiftEnd || S.end), r.t.workdays, r.t.present, r.t.absent, r.t.lateDays, r.t.lateMin]
     .concat(types.map(t => r.t.leave[t] || 0)).concat([r.t.noOut, r.t.hours]));
   head_(sh.getRange(4, 1, 1, sumH.length).setValues([sumH]));
   if (sum.length) { sh.getRange(5, 1, sum.length, 1).setNumberFormat('@'); sh.getRange(5, 1, sum.length, sumH.length).setValues(sum); }

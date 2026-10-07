@@ -186,11 +186,11 @@ function writeMonthSheet_(m, rep, S, now) {
   if (sh) sh.clear(); else sh = ss.insertSheet(name);
 
   sh.getRange(1, 1).setValue('สรุปการทำงาน เดือน' + TH_MF[mo - 1] + ' ' + (y + 543) + ' · ' + S.company).setFontSize(14).setFontWeight('bold');
-  sh.getRange(2, 1).setValue('เวลาเข้างาน ' + S.start + (S.grace ? ' (ผ่อนผัน ' + S.grace + ' นาที)' : '') + ' · นับถึงวันที่ ' + today + ' · อัปเดต ' + now.iso.replace('T', ' ')).setFontColor('#6b625a');
+  sh.getRange(2, 1).setValue('เวลางานบริษัท ' + S.start + '–' + S.end + (S.grace ? ' (ผ่อนผัน ' + S.grace + ' นาที)' : '') + ' · คนที่มีเวลางานของตัวเองนับสายตามเวลาของคนนั้น · นับถึงวันที่ ' + today + ' · อัปเดต ' + now.iso.replace('T', ' ')).setFontColor('#6b625a');
 
-  const sumH = ['รหัส', 'ชื่อ', 'ตำแหน่ง', 'วันทำงาน', 'มาทำงาน', 'ขาด (วัน)', 'มาสาย (ครั้ง)', 'สายรวม (นาที)']
+  const sumH = ['รหัส', 'ชื่อ', 'ตำแหน่ง', 'เวลางาน', 'วันทำงาน', 'มาทำงาน', 'ขาด (วัน)', 'มาสาย (ครั้ง)', 'สายรวม (นาที)']
     .concat(types.map(t => LT[t] + ' (วัน)')).concat(['ลืมเช็คเอาท์', 'ชั่วโมงในออฟฟิศ']);
-  const sum = rep.map(r => [r.emp.code, r.emp.name, r.emp.position, r.t.workdays, r.t.present, r.t.absent, r.t.lateDays, r.t.lateMin]
+  const sum = rep.map(r => [r.emp.code, r.emp.name, r.emp.position, (r.emp.shiftStart || S.start) + '–' + (r.emp.shiftEnd || S.end), r.t.workdays, r.t.present, r.t.absent, r.t.lateDays, r.t.lateMin]
     .concat(types.map(t => r.t.leave[t] || 0)).concat([r.t.noOut, r.t.hours]));
   head_(sh.getRange(4, 1, 1, sumH.length).setValues([sumH]));
   if (sum.length) { sh.getRange(5, 1, sum.length, 1).setNumberFormat('@'); sh.getRange(5, 1, sum.length, sumH.length).setValues(sum); }
@@ -228,7 +228,7 @@ function head_(rg) { rg.setFontWeight('bold').setBackground('#8B0000').setFontCo
  * ===================================================================== */
 var TC = (function () {
   var TABLES = {
-    EMP: { name: 'Employees', cols: ['id', 'code', 'name', 'gender', 'email', 'phone', 'position', 'photo', 'active', 'username', 'passHash', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note'] },
+    EMP: { name: 'Employees', cols: ['id', 'code', 'name', 'gender', 'email', 'phone', 'position', 'photo', 'active', 'username', 'passHash', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note', 'shiftStart', 'shiftEnd'] },
     REC: { name: 'Records', cols: ['date', 'empId', 'code', 'name', 'in', 'out', 'lateMin', 'inDist', 'outDist', 'note', 'updatedAt'] },
     LEAVE: { name: 'Leaves', cols: ['id', 'empId', 'code', 'name', 'type', 'start', 'end', 'part', 'days', 'reason', 'status', 'createdAt', 'decidedAt', 'decidedBy', 'adminNote'] },
     ADJ: { name: 'Adjustments', cols: ['id', 'empId', 'code', 'name', 'date', 'in', 'out', 'reason', 'status', 'createdAt', 'decidedAt', 'decidedBy', 'adminNote'] },
@@ -275,6 +275,8 @@ var TC = (function () {
   }
   function fmtDist(m) { return m >= 1000 ? (m / 1000).toFixed(2) + ' กม.' : Math.round(m) + ' ม.'; }
   function lateOf(t, S) { return t ? Math.max(0, toMin(t) - toMin(S.start) - (S.grace || 0)) : 0; }
+  /** เวลางานรายคน: ว่าง = ใช้เวลางานของบริษัท */
+  function shiftOf(e, S) { return { start: isTime(e && e.shiftStart) ? e.shiftStart : S.start, end: isTime(e && e.shiftEnd) ? e.shiftEnd : S.end, grace: S.grace }; }
   function overlaps(a1, a2, b1, b2) { return a1 <= b2 && b1 <= a2; }
 
   /* ---------- settings ---------- */
@@ -291,7 +293,7 @@ var TC = (function () {
   /* ---------- data access ---------- */
   function emps(A) { return A.rows(TABLES.EMP); }
   function isActive(e) { return String(e.active).toUpperCase() !== 'FALSE'; }
-  function pubEmp(e) { return { id: e.id, code: e.code, name: e.name, gender: e.gender, position: e.position, photo: e.photo, email: e.email, phone: e.phone }; }
+  function pubEmp(e) { return { id: e.id, code: e.code, name: e.name, gender: e.gender, position: e.position, photo: e.photo, email: e.email, phone: e.phone, shiftStart: e.shiftStart || '', shiftEnd: e.shiftEnd || '' }; }
   function recObj(r) { return { date: r.date, empId: r.empId, in: r.in, out: r.out, lateMin: num(r.lateMin, 0), inDist: num(r.inDist, null), outDist: num(r.outDist, null), note: r.note || '' }; }
   function leaveObj(l) { return { id: l.id, empId: l.empId, code: l.code, name: l.name, type: l.type, start: l.start, end: l.end, part: l.part || 'full', days: num(l.days, 0), reason: l.reason, status: l.status, createdAt: l.createdAt, decidedAt: l.decidedAt, adminNote: l.adminNote || '' }; }
   function adjObj(a) { return { id: a.id, empId: a.empId, code: a.code, name: a.name, date: a.date, in: a.in, out: a.out, reason: a.reason, status: a.status, createdAt: a.createdAt, decidedAt: a.decidedAt, adminNote: a.adminNote || '' }; }
@@ -414,7 +416,7 @@ var TC = (function () {
       c.A.update(TABLES.REC, r, { out: time, outDist: String(dist), updatedAt: c.now.iso });
       return { kind: 'out', rec: recObj(merge(r, { out: time, outDist: dist })) };
     }
-    var rec = merge(stamp(e), { date: date, in: time, out: '', lateMin: String(lateOf(time, S)), inDist: String(dist), outDist: '', note: '', updatedAt: c.now.iso });
+    var rec = merge(stamp(e), { date: date, in: time, out: '', lateMin: String(lateOf(time, shiftOf(e, S))), inDist: String(dist), outDist: '', note: '', updatedAt: c.now.iso });
     c.A.insert(TABLES.REC, rec);
     return { kind: 'in', rec: recObj(rec) };
   }
@@ -543,7 +545,7 @@ var TC = (function () {
   function upsertRecord(c, e, date, tin, tout, note) {
     var r = c.A.rows(TABLES.REC).filter(function (x) { return x.empId === e.id && x.date === date; })[0];
     var patch = { updatedAt: c.now.iso, note: note };
-    if (tin) { patch.in = tin; patch.lateMin = String(lateOf(tin, c.S)); }
+    if (tin) { patch.in = tin; patch.lateMin = String(lateOf(tin, shiftOf(e, c.S))); }
     if (tout) patch.out = tout;
     if (r) { c.A.update(TABLES.REC, r, patch); return; }
     if (!tin) throw E('วันนี้ยังไม่มีเวลาเข้างาน ต้องระบุเวลาเข้าด้วย');
@@ -575,11 +577,13 @@ var TC = (function () {
       return o;
     });
   }
-  var EMP_FIELDS = ['code', 'name', 'gender', 'email', 'phone', 'position', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note'];
+  var EMP_FIELDS = ['code', 'name', 'gender', 'email', 'phone', 'position', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note', 'shiftStart', 'shiftEnd'];
   function cleanEmp(src) {
     var o = {};
     EMP_FIELDS.forEach(function (k) { if (src[k] !== undefined) o[k] = str(src[k]); });
     if (o.phone !== undefined) o.phone = digits(o.phone);
+    ['shiftStart', 'shiftEnd'].forEach(function (k) { if (o[k] === undefined) return; if (/^\d:\d\d$/.test(o[k])) o[k] = '0' + o[k]; if (o[k] && !isTime(o[k])) throw E('เวลางานต้องอยู่ในรูปแบบ HH:MM เช่น 09:20'); });
+    if (o.shiftStart && o.shiftEnd && o.shiftEnd <= o.shiftStart) throw E('เวลาเลิกงานต้องหลังเวลาเข้างาน');
     return o;
   }
   function saveEmp(c) {
@@ -737,6 +741,6 @@ var TC = (function () {
 
   return {
     handle: handle, monthReport: monthReport, TABLES: TABLES, LEAVE_TYPES: LEAVE_TYPES, PART: PART, STATUS: STATUS,
-    DEFAULTS: DEFAULTS, util: { monthDays: monthDays, dow: dow, addDays: addDays, range: range, toMin: toMin, haversine: haversine, fmtDist: fmtDist, lateOf: lateOf, isDate: isDate, isTime: isTime }
+    DEFAULTS: DEFAULTS, util: { monthDays: monthDays, dow: dow, addDays: addDays, range: range, toMin: toMin, haversine: haversine, fmtDist: fmtDist, lateOf: lateOf, shiftOf: shiftOf, isDate: isDate, isTime: isTime }
   };
 })();
