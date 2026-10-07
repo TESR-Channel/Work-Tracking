@@ -87,6 +87,38 @@ function monthSel(id, cur, n) {
 function err(id, e) { var x = document.getElementById(id); if (x) x.innerHTML = '<div class="err">' + esc(e.message || e) + '</div>'; else A.toast(e.message || e); }
 
 /* ================= ภาพรวมวันนี้ ================= */
+/* ================= เซลฟี่ยืนยันตัวตน ================= */
+var CAM_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>';
+var SELFIES = {}, CAMS = {};
+function getSelfie(ref) {
+  if (!SELFIES[ref]) SELFIES[ref] = api('selfie', { ref: ref }).then(function (r) { return r.data || ''; }).catch(function () { return ''; });
+  return SELFIES[ref];
+}
+function camKey(e, r) { var k = e.id + '|' + r.date; CAMS[k] = { e: e, r: r }; return k; }
+function camBtn(e, r) { return r && (r.inPhoto || r.outPhoto) ? '<button class="cam-btn" data-cam="' + camKey(e, r) + '" title="ดูเซลฟี่" aria-label="ดูเซลฟี่">' + CAM_ICON + '</button>' : ''; }
+function thumbs(e, r) {
+  if (!r || !(r.inPhoto || r.outPhoto)) return '<span class="muted small">—</span>';
+  return '<button class="sthumbs" data-cam="' + camKey(e, r) + '" title="เทียบกับรูปโปรไฟล์">' + [r.inPhoto, r.outPhoto].filter(String).map(function (ref) { return '<img data-ref="' + esc(ref) + '" alt="">'; }).join('') + '</button>';
+}
+function openSelfies(k) {
+  var x = CAMS[k]; if (!x) return; var e = x.e, r = x.r;
+  var figs = [['pf', 'รูปโปรไฟล์', e.photo ? '<img src="' + esc(e.photo) + '" alt="">' : '<div class="ph">ยังไม่มีรูปโปรไฟล์</div>']];
+  if (r.inPhoto) figs.push(['fi', 'ตอนเข้างาน ' + esc(r.in), '<div class="ph">กำลังโหลด…</div>']);
+  if (r.outPhoto) figs.push(['fo', 'ตอนออกงาน ' + esc(r.out), '<div class="ph">กำลังโหลด…</div>']);
+  A.modal('<div class="sheet-h"><h3>' + esc(e.name) + ' · ' + A.thDate(r.date, 'year') + '</h3><button class="x" data-close aria-label="ปิด">×</button></div><div class="sheet-b stack">' +
+    '<div class="selfie-pair" style="grid-template-columns:repeat(' + figs.length + ',1fr)">' + figs.map(function (f) { return '<figure id="' + f[0] + '">' + f[2] + '<figcaption>' + f[1] + '</figcaption></figure>'; }).join('') + '</div>' +
+    (r.flag ? '<div class="note" style="color:var(--bad)">ตรวจสอบมือถือ: ' + esc(r.flag) + '</div>' : '') +
+    '<p class="small muted">เทียบหน้าในเซลฟี่กับรูปโปรไฟล์ ถ้าไม่ใช่คนเดียวกัน แก้เวลาได้ที่รายงานรายเดือนพร้อมใส่หมายเหตุ</p></div>', 'wide');
+  [['fi', r.inPhoto], ['fo', r.outPhoto]].forEach(function (p) {
+    if (!p[1]) return;
+    getSelfie(p[1]).then(function (url) { var f = document.querySelector('#' + p[0] + ' .ph'); if (f) f.outerHTML = url ? '<img src="' + url + '" alt="">' : '<div class="ph">รูปถูกลบแล้ว (เกินระยะเวลาเก็บ)</div>'; });
+  });
+}
+function bindCams(root) {
+  root.querySelectorAll('[data-cam]').forEach(function (b) { b.onclick = function (ev) { ev.stopPropagation(); openSelfies(b.dataset.cam); }; });
+  root.querySelectorAll('.sthumbs img[data-ref]').forEach(function (img) { getSelfie(img.dataset.ref).then(function (u) { if (u) img.src = u; else img.classList.add('gone'); }); });
+}
+
 function pToday(el, banner) {
   return api('adminToday').then(function (d) {
     var rb = {}, lb = {};
@@ -98,7 +130,7 @@ function pToday(el, banner) {
     var onLeave = rows.filter(function (x) { return !x.r && x.l && x.l.status === 'approved'; }).length;
     var pend = d.pending.leaves.length + d.pending.adjustments.length; setCount(pend);
     var status = function (x) {
-      if (x.r) return x.r.lateMin > 0 ? A.pill('late', 'สาย ' + x.r.lateMin + ' น.') : A.pill('ok', 'ตรงเวลา');
+      if (x.r) return (x.r.lateMin > 0 ? A.pill('late', 'สาย ' + x.r.lateMin + ' น.') : A.pill('ok', 'ตรงเวลา')) + (x.r.flag ? ' <span title="' + esc(x.r.flag) + '">' + A.pill('bad', 'ตรวจสอบมือถือ') + '</span>' : '');
       if (x.l && x.l.status === 'approved') return A.pill('leave', A.leaveLabel(x.l));
       if (d.holiday) return A.pill('holiday', 'วันหยุด');
       if (x.off) return A.pill('off', 'ไม่ใช่วันทำงาน');
@@ -114,12 +146,13 @@ function pToday(el, banner) {
       '<div class="kpis num"><div class="card kpi k-ok"><span>เข้างานแล้ว</span><b>' + inN + '<small class="muted" style="font-size:15px"> / ' + (rows.length - offN) + '</small></b></div>' +
       '<div class="card kpi k-late"><span>มาสายวันนี้</span><b>' + late + '</b></div><div class="card kpi k-leave"><span>ลาวันนี้</span><b>' + onLeave + '</b></div>' +
       '<div class="card kpi k-bad"><span>ยังไม่เข้างาน</span><b>' + Math.max(0, rows.length - inN - onLeave - offN) + '</b></div><div class="card kpi k-req"><span>คำขอรออนุมัติ</span><b>' + pend + '</b></div></div>' +
-      '<div class="grid-2"><div class="card tbl-wrap"><table><thead><tr><th>พนักงาน</th><th>สถานะ</th><th class="r">เข้างาน</th><th class="r">ออกงาน</th><th class="r">ระยะตอนสแกน</th></tr></thead><tbody>' +
+      '<div class="grid-2"><div class="card tbl-wrap"><table><thead><tr><th>พนักงาน</th><th>สถานะ</th><th class="r">เข้างาน</th><th class="r">ออกงาน</th><th class="r">ระยะตอนสแกน</th><th class="c">เซลฟี่</th></tr></thead><tbody>' +
       (rows.map(function (x) {
-        return '<tr><td>' + A.person(x.e) + '</td><td>' + status(x) + '</td><td class="r num mono">' + (x.r ? esc(x.r.in) : '—') + '</td><td class="r num mono">' + (x.r && x.r.out ? esc(x.r.out) : '—') + '</td><td class="r num">' + (x.r && x.r.inDist !== null ? TC.util.fmtDist(x.r.inDist) : '—') + '</td></tr>';
-      }).join('') || '<tr><td colspan="5" class="empty">ยังไม่มีพนักงาน · เพิ่มได้ที่เมนูพนักงาน</td></tr>') + '</tbody></table></div>' +
+        return '<tr><td>' + A.person(x.e) + '</td><td>' + status(x) + '</td><td class="r num mono">' + (x.r ? esc(x.r.in) : '—') + '</td><td class="r num mono">' + (x.r && x.r.out ? esc(x.r.out) : '—') + '</td><td class="r num">' + (x.r && x.r.inDist !== null ? TC.util.fmtDist(x.r.inDist) : '—') + '</td><td class="c">' + thumbs(x.e, x.r) + '</td></tr>';
+      }).join('') || '<tr><td colspan="6" class="empty">ยังไม่มีพนักงาน · เพิ่มได้ที่เมนูพนักงาน</td></tr>') + '</tbody></table></div>' +
       '<div class="stack"><div class="card"><div class="panel-h"><h3>รออนุมัติ</h3><button class="btn primary sm" id="toReq">พิจารณา (' + pend + ')</button></div><ul class="list">' + (pl || '<li class="empty" style="display:block">ไม่มีคำขอค้าง</li>') + '</ul></div>' +
       '<div class="card"><div class="panel-h"><h3>ลาวันนี้</h3></div><ul class="list">' + (lv || '<li class="empty" style="display:block">ไม่มีใครลา</li>') + '</ul></div></div></div>';
+    bindCams(el);
     document.getElementById('rf').onclick = function () { go('today'); };
     document.getElementById('toReq').onclick = function () { go('req'); };
   });
@@ -221,6 +254,7 @@ function flagChips(x) {
     if (f === 'early') o += A.pill('late', 'ออกก่อน ' + x.early + ' น.') + ' ';
     if (f === 'noOut') o += A.pill('bad', 'ลืมเช็คเอาท์') + ' ';
     if (f === 'absent') o += A.pill('bad', 'ขาด') + ' ';
+    if (f === 'device') o += '<span title="' + esc(x.rec && x.rec.flag) + '">' + A.pill('bad', 'ตรวจสอบมือถือ') + '</span> ';
   });
   return o;
 }
@@ -230,6 +264,7 @@ function sumChips(t) {
   if (t.earlyDays) o += A.pill('late', 'ออกก่อน ' + t.earlyDays) + ' ';
   if (t.noOut) o += A.pill('bad', 'ลืมเช็คเอาท์ ' + t.noOut) + ' ';
   if (t.absent) o += A.pill('bad', 'ขาด ' + A.fmtDays(t.absent)) + ' ';
+  if (t.devFlags) o += A.pill('bad', 'ตรวจสอบมือถือ ' + t.devFlags) + ' ';
   return o || A.pill('ok', 'ปกติ');
 }
 function leaveBrief(t) { return LT().filter(function (k) { return t.leave[k]; }).map(function (k) { return TC.LEAVE_TYPES[k].replace('ลา', '') + ' ' + A.fmtDays(t.leave[k]); }).join(' · '); }
@@ -318,16 +353,17 @@ function pReport(el, banner) {
         '<div class="tbl-wrap"><table><thead><tr><th>วันที่</th><th>เวลางาน</th><th>สถานะ</th><th class="r">เข้างาน</th><th class="r">ออกงาน</th><th>แจ้งเตือน</th><th>การลา / หมายเหตุ</th><th class="r"></th></tr></thead><tbody>' +
         (days.map(function (x) {
           var editing = st.editDay === x.date, r = x.rec;
-          var note = [x.leave ? A.leaveLabel(x.leave) + (x.leave.status !== 'approved' ? ' (รออนุมัติ)' : '') : '', r && r.note ? r.note : '', x.holiday].filter(String).join(' · ');
+          var note = [x.leave ? A.leaveLabel(x.leave) + (x.leave.status !== 'approved' ? ' (รออนุมัติ)' : '') : '', r && r.note ? r.note : '', r && r.flag ? 'มือถือ: ' + r.flag : '', x.holiday].filter(String).join(' · ');
           var shift = x.shift ? '<span class="mono small">' + esc(x.shift.start) + '–' + esc(x.shift.end) + '</span>' : '<span class="muted small">วันหยุด</span>';
           return '<tr><td class="num">' + A.thDate(x.date) + '</td><td>' + shift + '</td><td>' + A.stPill(x.st) + '</td>' +
             (editing ? '<td class="r inline-edit"><input type="time" id="ei" value="' + esc(r ? r.in : '') + '"></td><td class="r inline-edit"><input type="time" id="eo" value="' + esc(r ? r.out : '') + '"></td><td></td><td class="inline-edit"><input id="en" style="width:100%" placeholder="เหตุผลที่แก้" value=""></td><td class="r" style="white-space:nowrap"><button class="btn ok sm" id="es">บันทึก</button> <button class="btn ghost sm" id="ex">ยกเลิก</button></td>'
-              : '<td class="r mono">' + (r ? esc(r.in) : '—') + '</td><td class="r mono">' + (r && r.out ? esc(r.out) : '—') + '</td><td style="white-space:normal">' + flagChips(x) + '</td><td class="small">' + esc(note) + '</td><td class="r"><button class="btn ghost sm" data-edit="' + x.date + '">แก้ไข</button></td>') + '</tr>';
+              : '<td class="r mono" style="white-space:nowrap">' + (r ? esc(r.in) : '—') + camBtn(sel.emp, r) + '</td><td class="r mono">' + (r && r.out ? esc(r.out) : '—') + '</td><td style="white-space:normal">' + flagChips(x) + '</td><td class="small">' + esc(note) + '</td><td class="r"><button class="btn ghost sm" data-edit="' + x.date + '">แก้ไข</button></td>') + '</tr>';
         }).join('') || '<tr><td colspan="8" class="empty">' + (st.onlyAlerts ? 'ไม่มีวันที่มีแจ้งเตือน' : 'ยังไม่มีวันทำงานในเดือนนี้') + '</td></tr>') + '</tbody></table></div></div>' : '');
     document.getElementById('rm').onchange = function (ev) { st.month = ev.target.value; st.editDay = null; go('report'); };
     var oa = document.getElementById('oa'); if (oa) oa.onchange = function () { st.onlyAlerts = oa.checked; go('report'); };
     el.querySelectorAll('[data-emp]').forEach(function (tr) { tr.onclick = function () { st.selEmp = tr.dataset.emp; st.editDay = null; go('report'); }; });
     el.querySelectorAll('[data-edit]').forEach(function (b) { b.onclick = function () { st.editDay = b.dataset.edit; go('report'); }; });
+    bindCams(el);
     var ex = document.getElementById('ex'); if (ex) ex.onclick = function () { st.editDay = null; go('report'); };
     var es = document.getElementById('es'); if (es) es.onclick = function () {
       es.disabled = true;
@@ -344,7 +380,7 @@ function pReport(el, banner) {
       A.modal('<div class="sheet-h"><h3>' + esc(name) + '</h3><button class="x" data-close aria-label="ปิด">×</button></div><div class="sheet-b"><p class="small muted">ไฟล์ดาวน์โหลดแล้ว ถ้าไม่ขึ้น คัดลอกข้อความนี้ไปวางใน Excel / Google Sheets ได้</p><textarea class="csv" id="csvt" readonly>' + esc(text) + '</textarea><button class="btn ghost" id="cp">คัดลอก</button></div>', 'wide');
       document.getElementById('cp').onclick = function () { var t = document.getElementById('csvt'); (navigator.clipboard ? navigator.clipboard.writeText(t.value) : Promise.reject()).then(function () { A.toast('คัดลอกแล้ว'); }, function () { t.select(); A.toast('เลือกข้อความแล้ว กด Ctrl+C'); }); };
     };
-    var FL = { late: 'สาย', early: 'ออกก่อนเวลา', noOut: 'ลืมเช็คเอาท์', absent: 'ขาด' };
+    var FL = { late: 'สาย', early: 'ออกก่อนเวลา', noOut: 'ลืมเช็คเอาท์', absent: 'ขาด', device: 'ตรวจสอบมือถือ' };
     document.getElementById('xx').onclick = function () { monthlyReport(d); };
     document.getElementById('xs').onclick = function () {
       show('TESR-summary-' + st.month + '.csv', A.csv([['รหัส', 'ชื่อ', 'ตำแหน่ง', 'เวลางาน', 'วันทำงาน', 'มาทำงาน', 'ขาด(วัน)', 'มาสาย(ครั้ง)', 'สายรวม(นาที)', 'ออกก่อน(ครั้ง)', 'ออกก่อนรวม(นาที)', 'ลืมเช็คเอาท์'].concat(LT().map(function (t) { return TC.LEAVE_TYPES[t] + '(วัน)'; })).concat(['ชั่วโมงในออฟฟิศ', 'ตรงเวลา(%)', 'มาทำงาน(%)', 'รายการแจ้งเตือน'])]
@@ -353,7 +389,7 @@ function pReport(el, banner) {
     document.getElementById('xd').onclick = function () {
       var lines = [['วันที่', 'รหัส', 'ชื่อ', 'เวลางาน', 'สถานะ', 'เข้างาน', 'ออกงาน', 'สาย(นาที)', 'ออกก่อน(นาที)', 'แจ้งเตือน', 'การลา', 'หมายเหตุ']];
       rep.forEach(function (r) { r.days.forEach(function (x) { if (x.date > d.today || !(x.work || x.rec || x.leave)) return;
-        lines.push([x.date, r.emp.code, r.emp.name, x.shift ? x.shift.start + '-' + x.shift.end : '', A.ST[x.st][1], x.rec ? x.rec.in : '', x.rec ? x.rec.out : '', x.rec ? x.late : '', x.rec ? x.early : '', x.flags.map(function (f) { return FL[f]; }).join(', '), x.leave ? A.leaveLabel(x.leave) + (x.leave.status !== 'approved' ? ' (รออนุมัติ)' : '') : '', (x.rec && x.rec.note) || x.holiday]); }); });
+        lines.push([x.date, r.emp.code, r.emp.name, x.shift ? x.shift.start + '-' + x.shift.end : '', A.ST[x.st][1], x.rec ? x.rec.in : '', x.rec ? x.rec.out : '', x.rec ? x.late : '', x.rec ? x.early : '', x.flags.map(function (f) { return FL[f]; }).join(', '), x.leave ? A.leaveLabel(x.leave) + (x.leave.status !== 'approved' ? ' (รออนุมัติ)' : '') : '', [(x.rec && x.rec.note) || x.holiday, x.rec && x.rec.flag ? 'มือถือ: ' + x.rec.flag : ''].filter(String).join(' · ')]); }); });
       show('TESR-daily-' + st.month + '.csv', A.csv(lines));
     };
   });
@@ -369,13 +405,14 @@ function pEmps(el, banner) {
       (shown.map(function (e) {
         var u = e.usage, q = function (t) { var x = u[t]; return '<span class="num">' + A.fmtDays(x.used) + '</span><span class="muted">/' + x.quota + '</span>'; };
         return '<tr' + (e.active ? '' : ' style="opacity:.55"') + '><td>' + A.person(e) + '</td><td class="small"><div class="mono">' + esc(e.phone || '—') + '</div><div class="muted">' + esc(e.email || '') + '</div></td>' +
-          '<td class="small">' + (e.username ? esc(e.username) + '<div>' + (e.customPw ? A.pill('ok', 'ตั้งรหัสเองแล้ว') : A.pill('pending', 'รหัส = เบอร์โทร')) + '</div>' : A.pill('bad', 'ยังไม่มีอีเมล')) + '</td>' +
+          '<td class="small">' + (e.username ? esc(e.username) + '<div>' + (e.customPw ? A.pill('ok', 'ตั้งรหัสเองแล้ว') : A.pill('pending', 'รหัส = เบอร์โทร')) + '</div>' : A.pill('bad', 'ยังไม่มีอีเมล')) +
+            '<div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">' + (e.device ? A.pill('ok', 'ผูกมือถือแล้ว') + (e.active ? '<button class="btn ghost sm" data-resetdev="' + e.id + '">รีเซ็ตมือถือ</button>' : '') : A.pill('off', 'ยังไม่ผูกมือถือ')) + '</div></td>' +
           '<td class="small" style="white-space:nowrap">' + (e.custom ? '<b>' + esc(e.schedule) + '</b>' : '<span class="muted">' + esc(e.schedule) + '</span>') + '</td>' +
           '<td class="r">' + q('personal') + '</td><td class="r">' + q('sick') + '</td><td class="r">' + q('vacation') + '</td>' +
           '<td class="r" style="white-space:nowrap"><button class="btn ghost sm" data-edit="' + e.id + '">แก้ไข</button> ' +
           (e.active ? (e.customPw ? '<button class="btn ghost sm" data-reset="' + e.id + '">รีเซ็ตรหัส</button> ' : '') + '<button class="btn ghost sm" data-del="' + e.id + '">ปิดใช้งาน</button>' : '<button class="btn ghost sm" data-restore="' + e.id + '">เปิดใช้งาน</button>') + '</td></tr>';
       }).join('') || '<tr><td colspan="8" class="empty">ยังไม่มีพนักงาน · กด "เพิ่มพนักงาน" หรือ "นำเข้าจาก CSV"</td></tr>') + '</tbody></table></div>' +
-      '<p class="small muted">ชื่อผู้ใช้คืออีเมล รหัสผ่านเริ่มต้นคือเบอร์โทร · ถ้าพนักงานตั้งรหัสเองแล้วลืม กด "รีเซ็ตรหัส" รหัสจะกลับเป็นเบอร์โทร · รหัสที่ตั้งเองเก็บแบบเข้ารหัส แอดมินดูไม่ได้ · ปิดใช้งานแล้วประวัติเดิมยังอยู่ในรายงาน</p>';
+      '<p class="small muted">ชื่อผู้ใช้คืออีเมล รหัสผ่านเริ่มต้นคือเบอร์โทร · ถ้าพนักงานตั้งรหัสเองแล้วลืม กด "รีเซ็ตรหัส" รหัสจะกลับเป็นเบอร์โทร · มือถือเครื่องแรกที่ลงเวลาจะผูกกับบัญชี ถ้าพนักงานเปลี่ยนเครื่องหรือเบราว์เซอร์ กด "รีเซ็ตมือถือ" · รหัสที่ตั้งเองเก็บแบบเข้ารหัส แอดมินดูไม่ได้ · ปิดใช้งานแล้วประวัติเดิมยังอยู่ในรายงาน</p>';
     document.getElementById('inact').onchange = function (ev) { st.showInactive = ev.target.checked; go('emps'); };
     document.getElementById('add').onclick = function () { empForm(null); };
     document.getElementById('imp').onclick = importForm;
@@ -390,6 +427,7 @@ function pEmps(el, banner) {
       });
     };
     two('[data-reset]', 'resetLogin', 'ยืนยันรีเซ็ต', 'รีเซ็ตแล้ว รหัสผ่านกลับเป็นเบอร์โทร');
+    two('[data-resetdev]', 'resetDevice', 'ยืนยันรีเซ็ตมือถือ', 'รีเซ็ตแล้ว · การลงเวลาครั้งถัดไปจะผูกกับมือถือเครื่องใหม่');
     two('[data-del]', 'delEmp', 'ยืนยันปิดใช้งาน', 'ปิดใช้งานแล้ว');
     el.querySelectorAll('[data-restore]').forEach(function (b) { b.onclick = function () { api('restoreEmp', { id: b.dataset.restore }).then(function () { A.toast('เปิดใช้งานแล้ว'); go('emps'); }).catch(function (e) { A.toast(e.message); }); }; });
   });
@@ -570,6 +608,11 @@ function pSet(el, banner) {
       '<h3 style="font-size:16px;margin-top:6px">เวลาทำงาน</h3><div class="row">' + f('s6', 'เวลาเข้างานบริษัท', o.start, 'type="time"') + f('s7', 'เวลาเลิกงานบริษัท', o.end, 'type="time"') + f('s8', 'ผ่อนผันสาย (นาที)', o.grace, 'type="number" min="0"') + '</div>' +
       '<div class="field"><span class="lbl">วันทำงาน</span><div class="days-pick">' + [1, 2, 3, 4, 5, 6, 0].map(function (i) { return '<label><input type="checkbox" value="' + i + '"' + (o.workdays.indexOf(i) >= 0 ? ' checked' : '') + '> ' + A.TH_D[i] + '</label>'; }).join('') + '</div></div>' +
       '<h3 style="font-size:16px;margin-top:6px">สิทธิ์ลาเริ่มต้นต่อปี (วัน)</h3><div class="row">' + f('q1', 'ลากิจ', o.qPersonal, 'type="number" min="0"') + f('q2', 'ลาป่วย', o.qSick, 'type="number" min="0"') + f('q3', 'ลาพักร้อน', o.qVacation, 'type="number" min="0"') + f('q4', 'ลาคลอด', o.qMaternity, 'type="number" min="0"') + '</div>' +
+      '<h3 style="font-size:16px;margin-top:6px">ยืนยันตัวตนตอนลงเวลา</h3>' +
+      '<label class="hrow small" style="gap:8px"><input type="checkbox" id="sx1"' + (o.selfie !== false ? ' checked' : '') + '> บังคับถ่ายเซลฟี่ด้วยกล้องหน้าทุกครั้งที่ลงเวลา (เลือกรูปจากอัลบั้มไม่ได้)</label>' +
+      '<div class="row"><div class="field"><label for="sx2">ล็อกมือถือ (1 บัญชี = 1 เครื่อง)</label><select id="sx2">' + [['off', 'ปิด · ไม่ตรวจมือถือ'], ['warn', 'แจ้งเตือน · ลงเวลาได้ แต่ขึ้นแจ้งเตือนในรายงาน'], ['block', 'บล็อก · ลงเวลาจากเครื่องอื่นไม่ได้']].map(function (x) { return '<option value="' + x[0] + '"' + (o.deviceLock === x[0] ? ' selected' : '') + '>' + x[1] + '</option>'; }).join('') + '</select></div>' +
+      f('sx3', 'เก็บรูปเซลฟี่ (วัน · 0 = เก็บตลอด)', o.selfieDays, 'type="number" min="0"') + '</div>' +
+      '<p class="small muted">เซลฟี่เก็บใน Google Drive ของเจ้าของชีตแบบไม่แชร์ลิงก์ ดูได้เฉพาะแอดมิน และลบอัตโนมัติเมื่อครบกำหนด · ควรแจ้งพนักงานก่อนเปิดใช้ (PDPA)</p>' +
       f('s9', 'URL หน้าพนักงาน (ใช้ทำ QR ให้สแกนด้วยกล้องมือถือได้เลย)', o.appUrl, 'type="url" placeholder="https://tesr-channel.github.io/Work-Tracking/"') +
       '<div id="serr"></div><button class="btn primary" type="submit">บันทึกการตั้งค่า</button></form>' +
       '<div class="stack"><div class="card pad stack"><h3 style="font-size:16px">QR Code ประจำวัน</h3><p class="small muted">เปิดบนแท็บเล็ตหน้าออฟฟิศ หรือพิมพ์ติดทุกเช้า · รหัสเปลี่ยนทุกวัน ถ่ายรูปไปใช้วันอื่นไม่ได้ · ต้องอยู่ในรัศมี ' + TC.util.fmtDist(o.radius) + '</p>' +
@@ -590,7 +633,7 @@ function pSet(el, banner) {
     };
     document.getElementById('sf').onsubmit = function (ev) {
       ev.preventDefault(); var g = function (id) { return document.getElementById(id).value; };
-      var s = { company: g('s1'), office: g('s2'), lat: g('s3'), lng: g('s4'), radius: g('s5'), start: g('s6'), end: g('s7'), grace: g('s8'), qPersonal: g('q1'), qSick: g('q2'), qVacation: g('q3'), qMaternity: g('q4'), appUrl: g('s9').trim(),
+      var s = { company: g('s1'), office: g('s2'), lat: g('s3'), lng: g('s4'), radius: g('s5'), start: g('s6'), end: g('s7'), grace: g('s8'), qPersonal: g('q1'), qSick: g('q2'), qVacation: g('q3'), qMaternity: g('q4'), appUrl: g('s9').trim(), selfie: document.getElementById('sx1').checked ? '1' : '0', deviceLock: g('sx2'), selfieDays: g('sx3'),
         workdays: [].slice.call(el.querySelectorAll('.days-pick input:checked')).map(function (i) { return i.value; }).join(',') };
       api('saveSettings', { settings: s }).then(function () { A.toast('บันทึกการตั้งค่าแล้ว'); go('set'); }).catch(function (e) { err('serr', e); });
     };
