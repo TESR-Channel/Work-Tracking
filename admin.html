@@ -233,6 +233,54 @@ function sumChips(t) {
   return o || A.pill('ok', 'ปกติ');
 }
 function leaveBrief(t) { return LT().filter(function (k) { return t.leave[k]; }).map(function (k) { return TC.LEAVE_TYPES[k].replace('ลา', '') + ' ' + A.fmtDays(t.leave[k]); }).join(' · '); }
+/* ---------- รายงานประจำเดือนแบบละเอียด (หน้าตาเหมือนไฟล์ Export AllSum เดิม) ---------- */
+function exportData(d) { return TC.exportTable(d.month, d.report, Object.assign({}, d.settings), d.today); }
+function rowBg(r) { return r.total ? 'FFFFFDD0' : r.st === 'absent' || (r.flags || []).indexOf('noOut') >= 0 ? 'FFFBE1DF' : (r.flags || []).length ? 'FFFBEAD6' : r.st === 'leave' ? 'FFE3ECFB' : (r.st === 'off' || r.st === 'holiday') ? 'FFF3F0EC' : null; }
+function monthlyReport(d) {
+  var t = exportData(d), cols = t.head1.length;
+  var th1 = '', skip = {};
+  t.merges.forEach(function (g) { for (var rr = g[0]; rr <= g[2]; rr++) for (var cc = g[1]; cc <= g[3]; cc++) if (rr !== g[0] || cc !== g[1]) skip[rr + ',' + cc] = 1; });
+  var cell = function (rr, cc, txt) {
+    if (skip[rr + ',' + cc]) return '';
+    var g = t.merges.filter(function (x) { return x[0] === rr && x[1] === cc; })[0];
+    return '<th' + (g ? ' rowspan="' + (g[2] - g[0] + 1) + '" colspan="' + (g[3] - g[1] + 1) + '"' : '') + '>' + esc(txt) + '</th>';
+  };
+  th1 = '<tr>' + t.head1.map(function (x, i) { return cell(0, i, x); }).join('') + '</tr><tr>' + t.head2.map(function (x, i) { return cell(1, i, x); }).join('') + '</tr>';
+  var body = t.rows.map(function (r) {
+    var bg = rowBg(r);
+    return '<tr' + (bg ? ' style="background:#' + bg.slice(2) + ';color:#17130f' + (r.total ? ';font-weight:700' : '') + '"' : '') + '>' + r.cells.map(function (c, i) { return '<td' + (i >= 2 && i < cols - 1 ? ' class="c num"' : '') + '>' + esc(c) + '</td>'; }).join('') + '</tr>';
+  }).join('');
+  A.modal('<div class="sheet-h"><h3>รายงานประจำเดือน ' + A.thMonth(d.month) + '</h3><div class="hrow"><button class="btn gold sm" id="xlsx">ดาวน์โหลด Excel</button><button class="x" data-close aria-label="ปิด">×</button></div></div>' +
+    '<div class="sheet-b"><p class="small muted">รูปแบบเดียวกับรายงาน Export AllSum เดิม · ชม.งาน = เวลางานมาตรฐานหักพักเที่ยง 1 ชม. ลบสาย/กลับก่อน · ขาดงาน = สาย + กลับก่อน หรือเต็มวันเมื่อไม่มา/ลืมบันทึก · แถวสีเหลืองคือยอดรวมของแต่ละคน</p>' +
+    '<div class="card tbl-wrap report-x" style="max-height:65vh"><table><thead>' + th1 + '</thead><tbody>' + body + '</tbody></table></div><div id="xerr"></div></div>', 'xl');
+  document.getElementById('xlsx').onclick = function () { downloadXlsx(d, t); };
+}
+function loadScript(src) { return new Promise(function (ok, no) { if (window.ExcelJS) return ok(); var s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = no; document.head.appendChild(s); }); }
+function downloadXlsx(d, t) {
+  var b = document.getElementById('xlsx'); b.disabled = true; b.textContent = 'กำลังสร้างไฟล์…';
+  loadScript('https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js').then(function () {
+    var wb = new ExcelJS.Workbook(), ws = wb.addWorksheet('Export ' + d.month, { views: [{ state: 'frozen', xSplit: 2, ySplit: 2 }] });
+    ws.addRow(t.head1); ws.addRow(t.head2);
+    t.merges.forEach(function (g) { ws.mergeCells(g[0] + 1, g[1] + 1, g[2] + 1, g[3] + 1); });
+    [1, 2].forEach(function (n) { ws.getRow(n).eachCell({ includeEmpty: true }, function (c) { c.font = { bold: true, color: { argb: 'FFFFFFFF' }, name: 'Tahoma' }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8B0000' } }; c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; }); });
+    t.rows.forEach(function (r) {
+      var row = ws.addRow(r.cells), bg = rowBg(r);
+      row.eachCell({ includeEmpty: true }, function (c, i) {
+        c.font = { name: 'Tahoma', bold: !!r.total, size: 10 };
+        if (bg) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
+        if (i > 2 && i < t.head1.length) c.alignment = { horizontal: 'center' };
+      });
+    });
+    [12, 24, 12, 13, 13, 8, 8, 8, 8, 6, 8, 7, 10, 6, 6, 6, 8, 7, 45].forEach(function (w, i) { ws.getColumn(i + 1).width = w; });
+    return wb.xlsx.writeBuffer();
+  }).then(function (buf) {
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    a.download = 'TESR-รายงานประจำเดือน-' + d.month + '.xlsx'; document.body.appendChild(a); a.click(); a.remove();
+    A.toast('ดาวน์โหลดไฟล์ Excel แล้ว');
+  }).catch(function () { err('xerr', 'สร้างไฟล์ Excel ไม่สำเร็จ (โหลดตัวสร้างไฟล์ไม่ได้) ลองใช้ปุ่ม "รายวัน (CSV)" แทน'); })
+    .then(function () { b.disabled = false; b.textContent = 'ดาวน์โหลด Excel'; });
+}
+
 function pReport(el, banner) {
   return api('adminMonth', { month: st.month }).then(function (d) {
     var rep = d.report;
@@ -245,7 +293,7 @@ function pReport(el, banner) {
     el.innerHTML = banner + head('รายงานรายเดือน', 'สำหรับทำเงินเดือนและ KPI · นับถึงวันนี้ · สาย/ออกก่อนเทียบกับเวลางานของแต่ละคนในแต่ละวัน · ลาครึ่งวันที่อนุมัติแล้วไม่นับสาย/ออกก่อนในช่วงที่ลา',
       '<div class="toolbar"><div class="field"><label for="rm">เดือน</label>' + monthSel('rm', st.month) + '</div>' +
       (A.REMOTE ? '<button class="btn primary sm" id="bs">อัปเดตชีตสรุปใน Google Sheets</button>' : '') +
-      '<button class="btn gold sm" id="xs">Export สรุป (CSV)</button><button class="btn ghost sm" id="xd">Export รายวัน (CSV)</button></div>') +
+      '<button class="btn gold sm" id="xx">รายงานประจำเดือน (Excel)</button><button class="btn ghost sm" id="xs">สรุป KPI (CSV)</button><button class="btn ghost sm" id="xd">รายวัน (CSV)</button></div>') +
       '<div id="bsout"></div>' +
       '<div class="kpis num"><div class="card kpi k-req"><span>รายการต้องตรวจสอบ</span><b>' + tot.alerts + small('รายการ') + '</b></div>' +
       '<div class="card kpi k-late"><span>สายรวมทั้งทีม</span><b>' + tot.lateMin + small('นาที') + '</b></div>' +
@@ -297,6 +345,7 @@ function pReport(el, banner) {
       document.getElementById('cp').onclick = function () { var t = document.getElementById('csvt'); (navigator.clipboard ? navigator.clipboard.writeText(t.value) : Promise.reject()).then(function () { A.toast('คัดลอกแล้ว'); }, function () { t.select(); A.toast('เลือกข้อความแล้ว กด Ctrl+C'); }); };
     };
     var FL = { late: 'สาย', early: 'ออกก่อนเวลา', noOut: 'ลืมเช็คเอาท์', absent: 'ขาด' };
+    document.getElementById('xx').onclick = function () { monthlyReport(d); };
     document.getElementById('xs').onclick = function () {
       show('TESR-summary-' + st.month + '.csv', A.csv([['รหัส', 'ชื่อ', 'ตำแหน่ง', 'เวลางาน', 'วันทำงาน', 'มาทำงาน', 'ขาด(วัน)', 'มาสาย(ครั้ง)', 'สายรวม(นาที)', 'ออกก่อน(ครั้ง)', 'ออกก่อนรวม(นาที)', 'ลืมเช็คเอาท์'].concat(LT().map(function (t) { return TC.LEAVE_TYPES[t] + '(วัน)'; })).concat(['ชั่วโมงในออฟฟิศ', 'ตรงเวลา(%)', 'มาทำงาน(%)', 'รายการแจ้งเตือน'])]
         .concat(rep.map(function (r) { var t = r.t; return [r.emp.code, r.emp.name, r.emp.position, TC.util.scheduleText(r.emp, d.settings), t.workdays, t.present, t.absent, t.lateDays, t.lateMin, t.earlyDays, t.earlyMin, t.noOut].concat(LT().map(function (k) { return t.leave[k]; })).concat([t.hours, t.onTimeRate === null ? '' : t.onTimeRate, t.attendRate === null ? '' : t.attendRate, t.alerts]); }))));
