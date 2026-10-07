@@ -1,0 +1,15 @@
+{
+  "name": "TESR Time Clock",
+  "short_name": "TESR ลงเวลา",
+  "description": "ลงเวลาเข้า–ออกงาน ยื่นใบลา และดูประวัติของพนักงาน TESR",
+  "lang": "th",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d0b0a",
+  "theme_color": "#0d0b0a",
+  "icons": [
+    { "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
