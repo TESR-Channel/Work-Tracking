@@ -107,7 +107,7 @@ function vHome(el) {
   el.innerHTML = '<section class="hero"><div class="who"><span class="avatar lg" style="width:58px;height:58px;font-size:20px">' + (e.photo ? '<img src="' + esc(e.photo) + '" alt="" referrerpolicy="no-referrer">' : esc(e.name.slice(0, 1))) + '</span>' +
     '<div style="min-width:0"><h2>' + esc(e.name) + '</h2><div class="role">' + esc(e.position || '') + ' · ' + esc(e.code) + '</div></div></div>' +
     '<div><div class="clock num" id="clock">' + A.hm(now) + '</div><div class="clock-date">' + A.thDate(ME.today, 'long') + '</div></div>' +
-    '<div class="shift">เวลาทำงาน ' + esc(S.start) + '–' + esc(S.end) + ' · ' + esc(S.office) + '</div></section>' +
+    '<div class="shift">เวลาทำงาน ' + esc(e.shiftStart || S.start) + '–' + esc(e.shiftEnd || S.end) + ' · ' + esc(S.office) + '</div></section>' +
     '<div id="todaynote"></div>' +
     '<div class="punch"><div class="card cell"><div class="lbl">เข้างาน</div><div class="t num">' + (r && r.in || '--:--') + '</div>' +
     (r ? (r.lateMin ? A.pill('late', 'สาย ' + A.fmtLate(r.lateMin)) : A.pill('ok', 'ตรงเวลา')) : A.pill('idle', 'ยังไม่เช็คอิน')) + '</div>' +

@@ -218,7 +218,7 @@ function pReport(el, banner) {
     var sel = rep.filter(function (r) { return r.emp.id === st.selEmp; })[0];
     var tot = { present: 0, lateMin: 0, absent: 0, leave: 0 };
     rep.forEach(function (r) { tot.present += r.t.present; tot.lateMin += r.t.lateMin; tot.absent += r.t.absent; tot.leave += r.t.leaveDays; });
-    el.innerHTML = banner + head('รายงานรายเดือน', 'สรุปสำหรับทำเงินเดือน · นับถึงวันนี้ · ลาครึ่งวันเช้าที่อนุมัติแล้วไม่นับสาย',
+    el.innerHTML = banner + head('รายงานรายเดือน', 'สรุปสำหรับทำเงินเดือน · นับถึงวันนี้ · นับสายตามเวลางานของแต่ละคน · ลาครึ่งวันเช้าที่อนุมัติแล้วไม่นับสาย',
       '<div class="toolbar"><div class="field"><label for="rm">เดือน</label>' + monthSel('rm', st.month) + '</div>' +
       (A.REMOTE ? '<button class="btn primary sm" id="bs">อัปเดตชีตสรุปใน Google Sheets</button>' : '') +
       '<button class="btn gold sm" id="xs">Export สรุป (CSV)</button><button class="btn ghost sm" id="xd">Export รายวัน (CSV)</button></div>') +
@@ -281,15 +281,16 @@ function pEmps(el, banner) {
     var shown = list.filter(function (e) { return st.showInactive || e.active; });
     el.innerHTML = banner + head('พนักงาน', list.filter(function (e) { return e.active; }).length + ' คนที่ใช้งานอยู่ · พนักงานลงทะเบียนเองด้วยรหัสพนักงาน + เบอร์โทร',
       '<div class="hrow"><label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="inact"' + (st.showInactive ? ' checked' : '') + '> แสดงคนที่ปิดใช้งาน</label><button class="btn ghost sm" id="imp">นำเข้าจาก CSV</button><button class="btn primary sm" id="add">เพิ่มพนักงาน</button></div>') +
-      '<div class="card tbl-wrap"><table><thead><tr><th>พนักงาน</th><th>ติดต่อ</th><th>บัญชีเข้าระบบ</th><th class="r">ลากิจ</th><th class="r">ลาป่วย</th><th class="r">พักร้อน</th><th class="r"></th></tr></thead><tbody>' +
+      '<div class="card tbl-wrap"><table><thead><tr><th>พนักงาน</th><th>ติดต่อ</th><th>บัญชีเข้าระบบ</th><th>เวลางาน</th><th class="r">ลากิจ</th><th class="r">ลาป่วย</th><th class="r">พักร้อน</th><th class="r"></th></tr></thead><tbody>' +
       (shown.map(function (e) {
         var u = e.usage, q = function (t) { var x = u[t]; return '<span class="num">' + A.fmtDays(x.used) + '</span><span class="muted">/' + x.quota + '</span>'; };
         return '<tr' + (e.active ? '' : ' style="opacity:.55"') + '><td>' + A.person(e) + '</td><td class="small"><div class="mono">' + esc(e.phone || '—') + '</div><div class="muted">' + esc(e.email || '') + '</div></td>' +
           '<td>' + (e.username ? '<span class="mono">' + esc(e.username) + '</span>' : A.pill('pending', 'ยังไม่ลงทะเบียน')) + '</td>' +
+          '<td class="mono small">' + (e.shiftStart || e.shiftEnd ? '<b>' + esc(e.shiftStart || INFO.settings.start) + '–' + esc(e.shiftEnd || INFO.settings.end) + '</b>' : '<span class="muted">' + esc(INFO.settings.start) + '–' + esc(INFO.settings.end) + '</span>') + '</td>' +
           '<td class="r">' + q('personal') + '</td><td class="r">' + q('sick') + '</td><td class="r">' + q('vacation') + '</td>' +
           '<td class="r" style="white-space:nowrap"><button class="btn ghost sm" data-edit="' + e.id + '">แก้ไข</button> ' +
           (e.active ? (e.username ? '<button class="btn ghost sm" data-reset="' + e.id + '">รีเซ็ตบัญชี</button> ' : '') + '<button class="btn ghost sm" data-del="' + e.id + '">ปิดใช้งาน</button>' : '<button class="btn ghost sm" data-restore="' + e.id + '">เปิดใช้งาน</button>') + '</td></tr>';
-      }).join('') || '<tr><td colspan="7" class="empty">ยังไม่มีพนักงาน · กด "เพิ่มพนักงาน" หรือ "นำเข้าจาก CSV"</td></tr>') + '</tbody></table></div>' +
+      }).join('') || '<tr><td colspan="8" class="empty">ยังไม่มีพนักงาน · กด "เพิ่มพนักงาน" หรือ "นำเข้าจาก CSV"</td></tr>') + '</tbody></table></div>' +
       '<p class="small muted">รีเซ็ตบัญชีจะล้างชื่อผู้ใช้และรหัสผ่าน ให้พนักงานลงทะเบียนใหม่ด้วยรหัสพนักงาน + เบอร์โทร · รหัสผ่านเก็บแบบเข้ารหัส แอดมินจึงดูรหัสผ่านไม่ได้ · ปิดใช้งานแล้วประวัติเดิมยังอยู่ในรายงาน</p>';
     document.getElementById('inact').onchange = function (ev) { st.showInactive = ev.target.checked; go('emps'); };
     document.getElementById('add').onclick = function () { empForm(null); };
@@ -316,6 +317,8 @@ function empForm(e) {
     '<div class="row">' + f('fc', 'รหัสพนักงาน', e.code, 'required') + f('fn', 'ชื่อ–นามสกุล', e.name, 'required') + '</div>' +
     '<div class="row"><div class="field"><label for="fg">เพศ</label><select id="fg"><option value="">—</option><option value="Male"' + (e.gender === 'Male' ? ' selected' : '') + '>ชาย</option><option value="Female"' + (e.gender === 'Female' ? ' selected' : '') + '>หญิง</option></select></div>' + f('fp', 'ตำแหน่ง', e.position) + '</div>' +
     '<div class="row">' + f('fph', 'เบอร์โทร (ใช้ยืนยันตอนลงทะเบียน)', e.phone, 'type="tel" required') + f('fe', 'อีเมล', e.email, 'type="email"') + '</div>' +
+    '<div class="field"><span class="lbl">เวลางานของคนนี้ · เว้นว่าง = ใช้เวลางานบริษัท ' + esc(INFO.settings.start) + '–' + esc(INFO.settings.end) + '</span><div class="row">' +
+    f('fs1', 'เวลาเข้างาน', e.shiftStart, 'type="time"') + f('fs2', 'เวลาเลิกงาน', e.shiftEnd, 'type="time"') + '</div></div>' +
     '<div class="field"><span class="lbl">สิทธิ์ลาต่อปี (วัน) · เว้นว่าง = ใช้ค่าเริ่มต้นของบริษัท</span><div class="row">' +
     f('q1', 'ลากิจ', e.qPersonal, 'type="number" min="0" step="0.5" placeholder="' + INFO.settings.qPersonal + '"') + f('q2', 'ลาป่วย', e.qSick, 'type="number" min="0" step="0.5" placeholder="' + INFO.settings.qSick + '"') +
     f('q3', 'ลาพักร้อน', e.qVacation, 'type="number" min="0" step="0.5" placeholder="' + INFO.settings.qVacation + '"') + f('q4', 'ลาคลอด', e.qMaternity, 'type="number" min="0" step="1" placeholder="' + INFO.settings.qMaternity + '"') + '</div></div>' +
@@ -323,11 +326,11 @@ function empForm(e) {
     '<div id="eerr"></div><button class="btn primary block" type="submit">บันทึก</button></form>', 'wide');
   document.getElementById('ef').onsubmit = function (ev) {
     ev.preventDefault(); var g = function (id) { return document.getElementById(id).value; };
-    api('saveEmp', { emp: { id: e.id, code: g('fc'), name: g('fn'), gender: g('fg'), position: g('fp'), phone: g('fph'), email: g('fe'), qPersonal: g('q1'), qSick: g('q2'), qVacation: g('q3'), qMaternity: g('q4'), note: g('fnote') } })
+    api('saveEmp', { emp: { id: e.id, code: g('fc'), name: g('fn'), gender: g('fg'), position: g('fp'), phone: g('fph'), email: g('fe'), qPersonal: g('q1'), qSick: g('q2'), qVacation: g('q3'), qMaternity: g('q4'), note: g('fnote'), shiftStart: g('fs1'), shiftEnd: g('fs2') } })
       .then(function () { A.closeModal(); A.toast('บันทึกแล้ว'); go('emps'); }).catch(function (x) { err('eerr', x); });
   };
 }
-var IMPORT_COLS = ['code', 'name', 'gender', 'email', 'phone', 'position', 'qPersonal', 'qSick', 'qVacation', 'qMaternity'];
+var IMPORT_COLS = ['code', 'name', 'gender', 'email', 'phone', 'position', 'shiftStart', 'shiftEnd', 'qPersonal', 'qSick', 'qVacation', 'qMaternity'];
 function importForm() {
   A.modal('<div class="sheet-h"><h3>นำเข้าพนักงานจาก CSV</h3><button class="x" data-close aria-label="ปิด">×</button></div><div class="sheet-b">' +
     '<p class="small muted">วางข้อมูลจาก Excel / Google Sheets หรือเลือกไฟล์ .csv · แถวแรกเป็นหัวตาราง คอลัมน์ที่รองรับ: <span class="mono">' + IMPORT_COLS.join(', ') + '</span> · รหัสที่มีอยู่แล้วจะถูกอัปเดต</p>' +
@@ -376,7 +379,7 @@ function pSet(el, banner) {
       '<div class="row">' + f('s1', 'ชื่อบริษัท', o.company) + f('s2', 'ชื่อสถานที่', o.office) + '</div>' +
       '<div class="row">' + f('s3', 'Latitude', o.lat, 'type="number" step="0.000001"') + f('s4', 'Longitude', o.lng, 'type="number" step="0.000001"') + f('s5', 'รัศมีที่อนุญาต (เมตร)', o.radius, 'type="number" min="50" step="50"') + '</div>' +
       '<div class="row" style="align-items:center"><button class="btn ghost sm" type="button" id="here" style="flex:0 0 auto">ใช้ตำแหน่งที่ฉันยืนอยู่ตอนนี้</button><a href="https://www.google.com/maps?q=' + o.lat + ',' + o.lng + '" target="_blank" rel="noopener" class="small">ดูบน Google Maps ↗</a></div>' +
-      '<h3 style="font-size:16px;margin-top:6px">เวลาทำงาน</h3><div class="row">' + f('s6', 'เวลาเข้างาน', o.start, 'type="time"') + f('s7', 'เวลาเลิกงาน', o.end, 'type="time"') + f('s8', 'ผ่อนผันสาย (นาที)', o.grace, 'type="number" min="0"') + '</div>' +
+      '<h3 style="font-size:16px;margin-top:6px">เวลาทำงาน</h3><div class="row">' + f('s6', 'เวลาเข้างานบริษัท', o.start, 'type="time"') + f('s7', 'เวลาเลิกงานบริษัท', o.end, 'type="time"') + f('s8', 'ผ่อนผันสาย (นาที)', o.grace, 'type="number" min="0"') + '</div>' +
       '<div class="field"><span class="lbl">วันทำงาน</span><div class="days-pick">' + [1, 2, 3, 4, 5, 6, 0].map(function (i) { return '<label><input type="checkbox" value="' + i + '"' + (o.workdays.indexOf(i) >= 0 ? ' checked' : '') + '> ' + A.TH_D[i] + '</label>'; }).join('') + '</div></div>' +
       '<h3 style="font-size:16px;margin-top:6px">สิทธิ์ลาเริ่มต้นต่อปี (วัน)</h3><div class="row">' + f('q1', 'ลากิจ', o.qPersonal, 'type="number" min="0"') + f('q2', 'ลาป่วย', o.qSick, 'type="number" min="0"') + f('q3', 'ลาพักร้อน', o.qVacation, 'type="number" min="0"') + f('q4', 'ลาคลอด', o.qMaternity, 'type="number" min="0"') + '</div>' +
       f('s9', 'URL หน้าพนักงาน (ใช้ทำ QR ให้สแกนด้วยกล้องมือถือได้เลย)', o.appUrl, 'type="url" placeholder="https://tesr-channel.github.io/Work-Tracking/"') +
