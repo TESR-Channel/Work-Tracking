@@ -52,19 +52,17 @@ var APP = (function () {
 
   /** api(action, params) — ส่งคำสั่งไป Apps Script (หรือโหมดทดลอง) พร้อม token ของหน้านั้น */
   /* ---------- API ---------- *
-   * ความเร็ว: Google Apps Script ตอบช้า (1–5 วินาที) จึง
-   *  1) ปลุกเซิร์ฟเวอร์ทันทีที่เปิดหน้า (warm-up)
-   *  2) คำสั่งอ่านข้อมูล: แสดงข้อมูลล่าสุดที่เคยโหลดทันที แล้วโหลดของใหม่เบื้องหลัง (ถ้าเปลี่ยนจะวาดหน้าใหม่ให้เอง)
-   *  3) หมดเวลา 30 วินาที และลองใหม่อัตโนมัติ 1 ครั้งสำหรับคำสั่งอ่าน
-   *  4) คำสั่งที่เขียนข้อมูลจะล้างแคชทั้งหมด เพื่อให้หน้าถัดไปเห็นข้อมูลใหม่ */
-  var CK = 'tesr-c:', FRESH_MS = 15000, MAX_AGE = 7 * 24 * 3600 * 1000, NOCACHE = { selfie: 1, qr: 1 };
-  var listeners = [];
+   * Google Apps Script ตอบช้า (1–5 วินาทีต่อครั้ง) จึงทำแบบนี้:
+   *  1) เข้าสู่ระบบ/เปิดแอป → ดึงข้อมูลทั้งหมดที่มีสิทธิ์เห็นครั้งเดียว (sync) แล้วเก็บไว้ในเครื่อง
+   *  2) ทุกหน้า (ภาพรวม ปฏิทิน รายงาน ฯลฯ) คำนวณในเครื่องด้วย core.js เดียวกับเซิร์ฟเวอร์ → เปิดได้ทันที
+   *  3) บันทึกข้อมูล (ลงเวลา อนุมัติ ฯลฯ) ส่งไปเซิร์ฟเวอร์ แล้วได้ข้อมูลชุดใหม่กลับมาในคำตอบเดียวกัน
+   *  4) อัปเดตเบื้องหลังทุก 1 นาที และทุกครั้งที่กลับมาเปิดแอป ถ้ามีอะไรเปลี่ยนจะวาดหน้าใหม่ให้เอง */
+  var CK = 'tesr-c:', listeners = [];
   function onFresh(fn) { listeners.push(fn); }
+  function notify(what) { listeners.forEach(function (fn) { try { fn(what); } catch (e) {} }); }
   /** วาดหน้าใหม่ได้ไหม: ไม่มีหน้าต่าง popup เปิดอยู่ และผู้ใช้ไม่ได้กำลังพิมพ์ */
   function idle() { var m = document.getElementById('modal'), a = document.activeElement; return !(m && !m.hidden) && !(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)); }
   function cacheClear() { try { Object.keys(localStorage).forEach(function (k) { if (k.indexOf(CK) === 0) localStorage.removeItem(k); }); } catch (e) {} }
-  function cacheGet(k) { try { var v = JSON.parse(localStorage.getItem(CK + k) || 'null'); return v && Date.now() - v.t < MAX_AGE ? v : null; } catch (e) { return null; } }
-  function cachePut(k, data) { try { var s = JSON.stringify({ t: Date.now(), d: data }); if (s.length < 400000) localStorage.setItem(CK + k, s); } catch (e) { cacheClear(); } }
   function post(body, retry) {
     var ctl = window.AbortController ? new AbortController() : null, timer = ctl ? setTimeout(function () { ctl.abort(); }, 30000) : null;
     return fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body), signal: ctl ? ctl.signal : undefined })
@@ -74,34 +72,74 @@ var APP = (function () {
       .catch(function (e) { if (retry > 0) return new Promise(function (ok) { setTimeout(ok, 700); }).then(function () { return post(body, retry - 1); }); throw e; });
   }
   function warmUp() { if (REMOTE) try { fetch(API_URL, { method: 'GET', mode: 'no-cors' }).catch(function () {}); } catch (e) {} }
+  /* นาฬิกาตามเวลาเซิร์ฟเวอร์ (เวลาไทย) สำหรับคำนวณในเครื่อง */
+  var BKK = null; try { BKK = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }); } catch (e) {}
+  function bkkNow(ms) {
+    var d = new Date(ms), p = {};
+    if (BKK) BKK.formatToParts(d).forEach(function (x) { p[x.type] = x.value; });
+    else { var t = new Date(ms + 7 * 3600000); p = { year: t.getUTCFullYear(), month: pad(t.getUTCMonth() + 1), day: pad(t.getUTCDate()), hour: pad(t.getUTCHours()), minute: pad(t.getUTCMinutes()), second: pad(t.getUTCSeconds()) }; }
+    var date = p.year + '-' + p.month + '-' + p.day, hh = p.hour === '24' ? '00' : p.hour;
+    return { date: date, time: hh + ':' + p.minute, iso: date + 'T' + hh + ':' + p.minute + ':' + p.second, ms: ms };
+  }
+  function snapAdapter(d) {
+    var off = d.ms - d.recv;
+    return {
+      rows: function (t) { return d.tables[t.name] || []; }, getSettings: function () { return d.settings; }, now: function () { return bkkNow(Date.now() + off); },
+      setSetting: function () {}, insert: function () {}, update: function () {}, remove: function () {}, lock: function (fn) { return fn(); },
+      sha256: function () { return ''; }, hmac: function () { return ''; }, uuid: function () { return ''; }, cacheGet: function () { return null; }, cachePut: function () {}
+    };
+  }
   function makeApi(tokenKey, onAuthFail) {
+    var SK = CK + 'snap:' + tokenKey, snap = null, SA = null, syncing = null;
     var unwrap = function (j) {
-      if (!j.ok) { if (j.code === 'AUTH' && onAuthFail) { cacheClear(); onAuthFail(); } var e = new Error(j.error || 'เกิดข้อผิดพลาด'); e.code = j.code; throw e; }
+      if (!j.ok) { if (j.code === 'AUTH' && onAuthFail) { cacheClear(); snap = null; onAuthFail(); } var e = new Error(j.error || 'เกิดข้อผิดพลาด'); e.code = j.code; throw e; }
       return j.data;
     };
-    var raw = function (body, write) {
-      if (!REMOTE) return new Promise(function (res) { setTimeout(function () { res(JSON.parse(JSON.stringify(TC.handle(TCMock.adapter, body)))); }, 120); });
-      return post(body, write ? 0 : 1);
+    var sig = function (d) { return d ? JSON.stringify([d.settings, d.tables, d.qr]) : ''; };
+    var setSnap = function (d, quiet) {
+      var before = sig(snap); d.recv = d.recv || Date.now(); d.got = Date.now();
+      snap = d; SA = snapAdapter(d);
+      try { localStorage.setItem(SK, JSON.stringify(d)); } catch (e) {}
+      if (!quiet && before && before !== sig(d)) notify('sync');
     };
-    return function (action, params) {
+    try { var saved = JSON.parse(localStorage.getItem(SK) || 'null'); if (saved && saved.tables && store.get(tokenKey)) { snap = saved; SA = snapAdapter(saved); } } catch (e) {}
+    var syncNow = function () {
+      var token = store.get(tokenKey); if (!REMOTE || !token) return Promise.resolve(null);
+      if (!syncing) syncing = post({ action: 'sync', token: token }, 1).then(unwrap).then(function (d) { d.recv = Date.now(); setSnap(d); syncing = null; return d; }, function (e) { syncing = null; throw e; });
+      return syncing;
+    };
+    var bg = function (maxAge) { if (snap && Date.now() - (snap.got || 0) > maxAge) syncNow().catch(function () {}); };
+    if (REMOTE) {
+      setInterval(function () { if (document.visibilityState !== 'hidden') bg(55000); }, 60000);
+      document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') bg(15000); });
+      window.addEventListener('focus', function () { bg(15000); });
+    }
+    var inRange = function (params) { var m = params && params.month; return !m || !snap.from || m > snap.from.slice(0, 7); };
+    var api = function (action, params) {
       var token = store.get(tokenKey) || '', body = Object.assign({ action: action, token: token }, params || {});
+      if (!REMOTE) return new Promise(function (res) { setTimeout(function () { res(JSON.parse(JSON.stringify(TC.handle(TCMock.adapter, body)))); }, 60); }).then(unwrap);
       var write = !!(TC.WRITES && TC.WRITES[action]);
-      if (write) return raw(body, action !== 'login').then(function (j) { cacheClear(); return unwrap(j); }); // login ลองใหม่ได้ · ลงเวลา/บันทึก ไม่ลองซ้ำเอง กันบันทึกซ้ำ
-      if (NOCACHE[action] || !token) return raw(body, false).then(unwrap);
-      var key = tokenKey + '|' + token.slice(-12) + '|' + action + '|' + JSON.stringify(params || {}), hit = cacheGet(key);
-      var fetchFresh = function () {
-        return raw(body, false).then(function (j) {
-          var d = unwrap(j), before = hit && JSON.stringify(hit.d);
-          cachePut(key, d);
-          if (hit && JSON.stringify(d) !== before) listeners.forEach(function (fn) { try { fn(action, d, params); } catch (e) {} });
-          return d;
+      if (write) {
+        body.sync = 1;
+        return post(body, action === 'login' ? 1 : 0).then(function (j) { // ลงเวลา/บันทึก ไม่ลองซ้ำเอง กันบันทึกซ้ำ
+          if (j.snap && j.snap.ok) { j.snap.data.recv = Date.now(); setSnap(j.snap.data, true); return unwrap(j); }
+          var data = unwrap(j);
+          return snap ? syncNow().then(function () { return data; }, function () { return data; }) : data;
         });
-      };
-      if (hit && hit.d && hit.d.today && hit.d.today !== ymd(new Date())) hit = null; // ข้อมูลของเมื่อวาน ไม่ใช้
-      if (!hit) return fetchFresh();
-      if (Date.now() - hit.t > FRESH_MS) fetchFresh().catch(function () {});
-      return Promise.resolve(hit.d);
+      }
+      if (TC.LOCAL && TC.LOCAL[action] && token) {
+        if (!snap) return syncNow().then(function () { return api(action, params); }, function () { return post(body, 1).then(unwrap); });
+        if (inRange(params)) {
+          var r = TC.local(SA, Object.assign({ action: action }, params || {}), snap.role, snap.id);
+          if (r.ok) { bg(30000); return Promise.resolve(JSON.parse(JSON.stringify(r.data))); }
+        }
+      }
+      if (action === 'qr' && snap && snap.qr) { bg(30000); return Promise.resolve(snap.qr); }
+      return post(body, 1).then(unwrap);
     };
+    api.sync = syncNow;
+    api.hasData = function () { return !!snap; };
+    return api;
   }
   warmUp();
 
