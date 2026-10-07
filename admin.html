@@ -598,7 +598,7 @@ function pHol(el, banner) {
 /* ================= ตั้งค่า & QR ================= */
 function pSet(el, banner) {
   return Promise.all([api('settings'), api('qr')]).then(function (res) {
-    INFO = res[0]; var o = INFO.settings, qr = res[1];
+    INFO = res[0]; var o = INFO.settings, qr = res[1]; var fixedQr = qr.mode !== 'daily';
     var f = function (id, label, val, attr) { return '<div class="field"><label for="' + id + '">' + label + '</label><input id="' + id + '" value="' + esc(val === undefined ? '' : val) + '" ' + (attr || '') + '></div>'; };
     el.innerHTML = banner + head('ตั้งค่า & QR Code', 'จุดลงเวลา เวลาทำงาน สิทธิ์ลาเริ่มต้น และบัญชีแอดมิน') +
       '<div class="grid-2"><form class="card pad stack" id="sf"><h3 style="font-size:16px">บริษัทและจุดลงเวลา</h3>' +
@@ -613,17 +613,38 @@ function pSet(el, banner) {
       '<div class="row"><div class="field"><label for="sx2">ล็อกมือถือ (1 บัญชี = 1 เครื่อง)</label><select id="sx2">' + [['off', 'ปิด · ไม่ตรวจมือถือ'], ['warn', 'แจ้งเตือน · ลงเวลาได้ แต่ขึ้นแจ้งเตือนในรายงาน'], ['block', 'บล็อก · ลงเวลาจากเครื่องอื่นไม่ได้']].map(function (x) { return '<option value="' + x[0] + '"' + (o.deviceLock === x[0] ? ' selected' : '') + '>' + x[1] + '</option>'; }).join('') + '</select></div>' +
       f('sx3', 'เก็บรูปเซลฟี่ (วัน · 0 = เก็บตลอด)', o.selfieDays, 'type="number" min="0"') + '</div>' +
       '<p class="small muted">เซลฟี่เก็บใน Google Drive ของเจ้าของชีตแบบไม่แชร์ลิงก์ ดูได้เฉพาะแอดมิน และลบอัตโนมัติเมื่อครบกำหนด · ควรแจ้งพนักงานก่อนเปิดใช้ (PDPA)</p>' +
+      '<div class="field"><label for="sx4">รูปแบบ QR Code</label><select id="sx4"><option value="static"' + (o.qrMode !== 'daily' ? ' selected' : '') + '>ถาวร · พิมพ์ติดผนังครั้งเดียว (แนะนำ)</option><option value="daily"' + (o.qrMode === 'daily' ? ' selected' : '') + '>เปลี่ยนทุกวัน · ต้องเปิดบนจอหรือพิมพ์ใหม่ทุกวัน</option></select></div>' +
       f('s9', 'URL หน้าพนักงาน (ใช้ทำ QR ให้สแกนด้วยกล้องมือถือได้เลย)', o.appUrl, 'type="url" placeholder="https://tesr-channel.github.io/Work-Tracking/"') +
       '<div id="serr"></div><button class="btn primary" type="submit">บันทึกการตั้งค่า</button></form>' +
-      '<div class="stack"><div class="card pad stack"><h3 style="font-size:16px">QR Code ประจำวัน</h3><p class="small muted">เปิดบนแท็บเล็ตหน้าออฟฟิศ หรือพิมพ์ติดทุกเช้า · รหัสเปลี่ยนทุกวัน ถ่ายรูปไปใช้วันอื่นไม่ได้ · ต้องอยู่ในรัศมี ' + TC.util.fmtDist(o.radius) + '</p>' +
-      '<div class="qrbox"><div id="qr"></div></div><div class="small muted mono" style="text-align:center">' + A.thDate(qr.date, 'year') + ' · ' + esc(qr.token) + '</div><button class="btn gold" id="full">เปิดโหมดแสดง QR เต็มจอ</button></div>' +
+      '<div class="stack"><div class="card pad stack"><h3 style="font-size:16px">' + (fixedQr ? 'QR Code สำหรับลงเวลา (ใช้ถาวร)' : 'QR Code ประจำวัน') + '</h3>' +
+      '<p class="small muted">' + (fixedQr ? 'พิมพ์ติดผนังได้เลย ใช้ได้ตลอด ไม่ต้องเปลี่ยน · คนที่ถ่ายรูป QR กลับบ้านไปก็ลงเวลาไม่ได้ เพราะต้องอยู่ในรัศมี ' + TC.util.fmtDist(o.radius) + (o.selfie !== false ? ' และต้องถ่ายเซลฟี่' : '') : 'รหัสเปลี่ยนทุกวัน ต้องเปิดบนแท็บเล็ตหรือพิมพ์ใหม่ทุกเช้า · ต้องอยู่ในรัศมี ' + TC.util.fmtDist(o.radius)) + '</p>' +
+      (o.appUrl ? '' : '<div class="note" style="color:var(--bad)">ยังไม่ได้ใส่ "URL หน้าพนักงาน" · ใส่และบันทึกก่อนพิมพ์ เพื่อให้สแกนด้วยกล้องมือถือได้ทันที</div>') +
+      '<div class="qrbox"><div id="qr"></div></div><div class="small muted mono" style="text-align:center">' + (fixedQr ? 'ชุดที่ ' + esc(qr.ver) : A.thDate(qr.date, 'year')) + ' · ' + esc(qr.token) + '</div>' +
+      '<div class="row"><button class="btn gold" id="prt" type="button">พิมพ์ QR ติดผนัง</button><button class="btn ghost" id="full" type="button">แสดงเต็มจอ</button></div>' +
+      (fixedQr ? '<button class="btn ghost sm" id="rot" type="button">สร้าง QR ชุดใหม่ (QR ที่พิมพ์ไว้จะใช้ไม่ได้)</button>' : '') + '</div>' +
       '<form class="card pad stack" id="af"><h3 style="font-size:16px">บัญชีแอดมิน</h3>' + f('a1', 'อีเมล / ชื่อผู้ใช้แอดมิน', INFO.adminUser, 'autocomplete="username" autocapitalize="none" required') +
       f('a2', 'รหัสผ่านปัจจุบัน', '', 'type="password" autocomplete="current-password" required') + '<div class="row">' + f('a3', 'รหัสผ่านใหม่', '', 'type="password" autocomplete="new-password" minlength="6" required') + f('a4', 'ยืนยัน', '', 'type="password" autocomplete="new-password" minlength="6" required') + '</div>' +
       '<div id="aerr"></div><button class="btn ghost" type="submit">เปลี่ยนบัญชีแอดมิน</button></form></div></div>';
     var drawQr = function (box, size) { box.innerHTML = ''; try { new QRCode(box, { text: qr.payload, width: size, height: size, colorDark: '#0d0b0a', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M }); } catch (e) { box.textContent = 'สร้าง QR ไม่สำเร็จ'; } };
     drawQr(document.getElementById('qr'), 220);
+    document.getElementById('prt').onclick = function () {
+      var box = document.createElement('div'); box.id = 'printqr';
+      box.innerHTML = '<div class="pq-brand"><span class="logo" role="img" aria-label="TESR"></span><div><b>' + esc(o.company) + '</b><small>' + esc(o.office) + '</small></div></div>' +
+        '<h1>สแกนเพื่อลงเวลาเข้า–ออกงาน</h1><div class="pq-code" id="pqc"></div>' +
+        '<ol><li>เปิดกล้องมือถือ หรือแอป TESR Time Clock แล้วสแกน</li><li>อนุญาตตำแหน่ง (GPS) · ต้องอยู่ในรัศมี ' + TC.util.fmtDist(o.radius) + '</li>' + (o.selfie !== false ? '<li>ถ่ายเซลฟี่ยืนยันตัวตน</li>' : '') + '</ol>' +
+        '<small class="pq-ver">' + (fixedQr ? 'ชุดที่ ' + esc(qr.ver) : A.thDate(qr.date, 'year')) + '</small>';
+      document.body.appendChild(box); drawQr(document.getElementById('pqc'), 420);
+      document.body.classList.add('printing');
+      var done = function () { document.body.classList.remove('printing'); box.remove(); window.removeEventListener('afterprint', done); };
+      window.addEventListener('afterprint', done);
+      setTimeout(function () { window.print(); setTimeout(function () { if (document.getElementById('printqr')) done(); }, 1500); }, 300);
+    };
+    var rot = document.getElementById('rot'); if (rot) rot.onclick = function () {
+      if (!rot.dataset.armed) { rot.dataset.armed = 1; rot.textContent = 'ยืนยัน: ยกเลิก QR เดิมและสร้างชุดใหม่'; rot.className = 'btn danger sm'; return; }
+      rot.disabled = true; api('rotateQr').then(function () { A.toast('สร้าง QR ชุดใหม่แล้ว · พิมพ์ติดแทนของเดิม'); go('set'); }).catch(function (e) { A.toast(e.message); rot.disabled = false; });
+    };
     document.getElementById('full').onclick = function () {
-      A.modal('<div class="sheet-b" style="align-items:center;text-align:center;padding:24px"><div class="login-brand" style="justify-content:center"><span class="logo" role="img" aria-label="TESR"></span><div style="text-align:left"><b>สแกนเพื่อลงเวลา</b><small>' + esc(o.office) + '</small></div></div><div class="qrbox" id="qrbig"></div><b style="font-family:var(--f-display);font-size:20px">' + A.thDate(qr.date, 'long') + '</b><p class="small muted">เปิดกล้องมือถือหรือแอป TESR Time Clock แล้วสแกน</p><button class="btn ghost" data-close>ปิด</button></div>', 'wide');
+      A.modal('<div class="sheet-b" style="align-items:center;text-align:center;padding:24px"><div class="login-brand" style="justify-content:center"><span class="logo" role="img" aria-label="TESR"></span><div style="text-align:left"><b>สแกนเพื่อลงเวลา</b><small>' + esc(o.office) + '</small></div></div><div class="qrbox" id="qrbig"></div><b style="font-family:var(--f-display);font-size:20px">' + (fixedQr ? 'ลงเวลาเข้า–ออกงาน' : A.thDate(qr.date, 'long')) + '</b><p class="small muted">เปิดกล้องมือถือหรือแอป TESR Time Clock แล้วสแกน</p><button class="btn ghost" data-close>ปิด</button></div>', 'wide');
       drawQr(document.getElementById('qrbig'), Math.min(420, window.innerWidth - 120));
       try { var el2 = document.querySelector('#modal .sheet'); if (el2.requestFullscreen) el2.requestFullscreen().catch(function () {}); } catch (e) {}
     };
@@ -633,7 +654,7 @@ function pSet(el, banner) {
     };
     document.getElementById('sf').onsubmit = function (ev) {
       ev.preventDefault(); var g = function (id) { return document.getElementById(id).value; };
-      var s = { company: g('s1'), office: g('s2'), lat: g('s3'), lng: g('s4'), radius: g('s5'), start: g('s6'), end: g('s7'), grace: g('s8'), qPersonal: g('q1'), qSick: g('q2'), qVacation: g('q3'), qMaternity: g('q4'), appUrl: g('s9').trim(), selfie: document.getElementById('sx1').checked ? '1' : '0', deviceLock: g('sx2'), selfieDays: g('sx3'),
+      var s = { company: g('s1'), office: g('s2'), lat: g('s3'), lng: g('s4'), radius: g('s5'), start: g('s6'), end: g('s7'), grace: g('s8'), qPersonal: g('q1'), qSick: g('q2'), qVacation: g('q3'), qMaternity: g('q4'), appUrl: g('s9').trim(), selfie: document.getElementById('sx1').checked ? '1' : '0', deviceLock: g('sx2'), selfieDays: g('sx3'), qrMode: g('sx4'),
         workdays: [].slice.call(el.querySelectorAll('.days-pick input:checked')).map(function (i) { return i.value; }).join(',') };
       api('saveSettings', { settings: s }).then(function () { A.toast('บันทึกการตั้งค่าแล้ว'); go('set'); }).catch(function (e) { err('serr', e); });
     };
