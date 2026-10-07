@@ -52,6 +52,7 @@ function nightly() {
   const n = new Date();
   buildSheet_(Utilities.formatDate(n, TZ, 'yyyy-MM'));
   if (Utilities.formatDate(n, TZ, 'd') === '1') buildSheet_(Utilities.formatDate(new Date(n.getFullYear(), n.getMonth() - 1, 1), TZ, 'yyyy-MM'));
+  try { cleanupSelfies_(); } catch (e) { console.error(e); }
 }
 function buildSheet_(m) { return TC_internalBuild_(SheetsAdapter_(), m); }
 function onOpen() {
@@ -132,6 +133,19 @@ function SheetsAdapter_() {
       file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
       return 'https://lh3.googleusercontent.com/d/' + file.getId();
     },
+    /** เซลฟี่ตอนลงเวลา: เก็บแบบส่วนตัว (ไม่แชร์ลิงก์) แอดมินดูผ่าน API เท่านั้น */
+    saveSelfie(emp, date, kind, b64) {
+      const file = selfieFolder_().createFile(Utilities.newBlob(Utilities.base64Decode(b64), 'image/jpeg', date + '_' + emp.code + '_' + kind + '.jpg'));
+      return file.getId();
+    },
+    getSelfie(id) {
+      let f; try { f = DriveApp.getFileById(id); } catch (e) { return ''; }
+      if (f.isTrashed()) return '';
+      const folderId = selfieFolder_().getId(), parents = f.getParents();
+      let inside = false; while (parents.hasNext()) if (parents.next().getId() === folderId) inside = true;
+      if (!inside) return '';
+      return 'data:image/jpeg;base64,' + Utilities.base64Encode(f.getBlob().getBytes());
+    },
     buildMonthSheet: writeMonthSheet_
   };
 }
@@ -176,6 +190,23 @@ function photoFolder_() {
   const f = DriveApp.createFolder('TESR Time Clock · Photos');
   props.setProperty('PHOTO_FOLDER', f.getId());
   return f;
+}
+
+function selfieFolder_() {
+  const props = PropertiesService.getScriptProperties(), id = props.getProperty('SELFIE_FOLDER');
+  if (id) { try { return DriveApp.getFolderById(id); } catch (e) {} }
+  const f = DriveApp.createFolder('TESR Time Clock · Selfies (private)');
+  props.setProperty('SELFIE_FOLDER', f.getId());
+  return f;
+}
+/** ลบเซลฟี่ที่เก่ากว่าจำนวนวันที่ตั้งไว้ (Settings: selfieDays · 0 = เก็บตลอด) */
+function cleanupSelfies_() {
+  const raw = readSettingsRaw_(), days = raw.selfieDays === undefined || raw.selfieDays === '' ? 90 : Number(raw.selfieDays);
+  if (!(days > 0)) return 0;
+  const cut = Date.now() - days * 86400000, it = selfieFolder_().getFiles();
+  let n = 0;
+  while (it.hasNext() && n < 400) { const f = it.next(); if (f.getDateCreated().getTime() < cut) { f.setTrashed(true); n++; } }
+  return n;
 }
 
 /* ===================== ชีตสรุปรายเดือน ===================== */
