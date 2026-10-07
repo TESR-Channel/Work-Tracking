@@ -52,7 +52,7 @@ function showLogin(msg) {
       .catch(function (e) { document.getElementById('lerr').innerHTML = '<div class="err">' + esc(e.message) + '</div>'; btn.disabled = false; });
   };
 }
-function logout(msg) { A.store.set(TOKEN, null); ME = null; MONTHS = {}; REQS = null; showLogin(msg); }
+function logout(msg) { A.store.set(TOKEN, null); A.cacheClear(); ME = null; MONTHS = {}; REQS = null; showLogin(msg); }
 
 /* ================= shell ================= */
 function start() {
@@ -73,12 +73,17 @@ function shell() {
     }).join('') + '</div></nav>';
   root.querySelectorAll('[data-go]').forEach(function (b) { b.onclick = function () { go(b.dataset.go); }; });
 }
-function go(v) {
+A.onFresh(function (action, d) {
+  if (!ME || !document.getElementById('view') || !A.idle()) return;
+  if (action === 'me') { ME = d; shell(); }
+  MONTHS = {}; REQS = null; go(view, true);
+});
+function go(v, keep) {
   view = v;
   root.querySelectorAll('[data-go]').forEach(function (b) { if (b.dataset.go === v) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
   var el = document.getElementById('view');
   ({ home: vHome, cal: vCal, leave: vLeave, me: vMe })[v](el);
-  window.scrollTo(0, 0);
+  if (!keep) window.scrollTo(0, 0);
 }
 function month(m, force) {
   if (MONTHS[m] && !force) return Promise.resolve(MONTHS[m]);
@@ -114,7 +119,7 @@ function vHome(el) {
     if (today && (today.holiday || today.leave)) {
       document.getElementById('todaynote').innerHTML = '<div class="note">' + (today.holiday ? 'วันนี้เป็นวันหยุด: ' + esc(today.holiday) : 'วันนี้มีใบลา: ' + esc(A.leaveLabel(today.leave)) + ' (' + A.REQ[today.leave.status][1] + ')') + '</div>';
     }
-    var past = d.report.days.filter(function (x) { return x.date <= ME.today && (x.work || x.rec || x.leave); }).reverse().slice(0, 7);
+    var past = d.report.days.filter(function (x) { return x.date <= ME.today && x.st !== 'pre' && (x.work || x.rec || x.leave); }).reverse().slice(0, 7);
     document.getElementById('recent').innerHTML = past.length ? past.map(dayRow).join('') : '<li class="empty" style="display:block">ยังไม่มีข้อมูลเดือนนี้</li>';
   }).catch(function (e) { A.toast(e.message); });
 }
@@ -129,12 +134,11 @@ function dayRow(x) {
 
 /* ================= calendar ================= */
 function vCal(el) {
-  el.innerHTML = '<div class="card pad stack"><div class="cal-nav"><button class="icon-btn" id="pv" aria-label="เดือนก่อน">‹</button><h3>' + A.thMonth(calMonth) + '</h3><button class="icon-btn" id="nx" aria-label="เดือนถัดไป">›</button></div>' +
+  el.innerHTML = '<div class="card pad stack"><div class="cal-nav">' + A.monthPicker('emp', calMonth) + '</div>' +
     '<div class="cal" id="cal"><div class="loading" style="grid-column:1/-1">กำลังโหลด…</div></div>' +
     '<div class="legend"><span><i class="dot ok"></i>มา</span><span><i class="dot late"></i>สาย</span><span><i class="dot absent"></i>ขาด</span><span><i class="dot leave"></i>ลา</span><span><i class="dot req"></i>ลารออนุมัติ</span><span><i class="dot holiday"></i>วันหยุด</span></div></div>' +
     '<div class="card" id="dd"></div><div id="adjs"></div>';
-  document.getElementById('pv').onclick = function () { calMonth = A.addMonth(calMonth, -1); selDay = null; vCal(el); };
-  document.getElementById('nx').onclick = function () { calMonth = A.addMonth(calMonth, 1); selDay = null; vCal(el); };
+  A.bindMonthPicker('emp', calMonth, function (m) { calMonth = m; selDay = null; vCal(el); });
   month(calMonth).then(function (d) {
     var by = {}; d.report.days.forEach(function (x) { by[x.date] = x; });
     if (!selDay || !by[selDay]) selDay = by[ME.today] ? ME.today : d.report.days[0].date;
