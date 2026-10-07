@@ -48,9 +48,9 @@ function showLogin(msg) {
 }
 function logout(msg) { A.store.set(TOKEN, null); A.cacheClear(); INFO = null; showLogin(msg); }
 /* ได้ข้อมูลใหม่จากเซิร์ฟเวอร์ (โหลดเบื้องหลัง) → วาดหน้าปัจจุบันใหม่ */
-A.onFresh(function (action, d) {
-  if (action === 'settings') { INFO = d; return; }
-  if (INFO && document.getElementById('main') && A.idle()) go(page, true);
+A.onFresh(function () {
+  if (!INFO || !document.getElementById('main') || !A.idle()) return;
+  api('settings').then(function (d) { INFO = d; go(page, true); }).catch(function () {});
 });
 
 /* ================= shell ================= */
@@ -411,7 +411,7 @@ function pEmps(el, banner) {
         return '<tr' + (e.active ? '' : ' style="opacity:.55"') + '><td>' + A.person(e) + '</td><td class="small"><div class="mono">' + esc(e.phone || '—') + '</div><div class="muted">' + esc(e.email || '') + '</div></td>' +
           '<td class="small">' + (e.username ? esc(e.username) + '<div>' + (e.customPw ? A.pill('ok', 'ตั้งรหัสเองแล้ว') : A.pill('pending', 'รหัส = เบอร์โทร')) + '</div>' : A.pill('bad', 'ยังไม่มีอีเมล')) +
             '<div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">' + (e.device ? A.pill('ok', 'ผูกมือถือแล้ว') + (e.active ? '<button class="btn ghost sm" data-resetdev="' + e.id + '">รีเซ็ตมือถือ</button>' : '') : A.pill('off', 'ยังไม่ผูกมือถือ')) + '</div></td>' +
-          '<td class="small" style="white-space:nowrap">' + (e.custom ? '<b>' + esc(e.schedule) + '</b>' : '<span class="muted">' + esc(e.schedule) + '</span>') + '</td>' +
+          '<td class="small" style="white-space:nowrap">' + (e.custom ? '<b>' + esc(e.schedule) + '</b>' : '<span>' + esc(e.schedule) + '</span>') + '<div style="margin-top:4px">' + (e.custom ? A.pill('leave', 'ตั้งเฉพาะคน') : A.pill('ok', 'ใช้ค่ามาตรฐานบริษัท')) + '</div></td>' +
           '<td class="r">' + q('personal') + '</td><td class="r">' + q('sick') + '</td><td class="r">' + q('vacation') + '</td>' +
           '<td class="r" style="white-space:nowrap"><button class="btn ghost sm" data-edit="' + e.id + '">แก้ไข</button> ' +
           (e.active ? (e.customPw ? '<button class="btn ghost sm" data-reset="' + e.id + '">รีเซ็ตรหัส</button> ' : '') + '<button class="btn ghost sm" data-del="' + e.id + '">ปิดใช้งาน</button>' : '<button class="btn ghost sm" data-restore="' + e.id + '">เปิดใช้งาน</button>') + '</td></tr>';
@@ -441,16 +441,25 @@ function scheduleEditor(e) {
   var S = INFO.settings, cur = TC.util.parseDays(e.workdays) || S.workdays, dt = TC.util.parseDayTimes(e.dayTimes);
   if (e.satStart || e.satEnd) dt[6] = dt[6] || { start: e.satStart || e.shiftStart || S.start, end: e.satEnd || e.shiftEnd || S.end };
   var f = function (id, label, val, ph) { return '<div class="field"><label for="' + id + '">' + label + '</label><input id="' + id + '" type="time" value="' + esc(val || '') + '"></div>'; };
-  return '<div class="field"><span class="lbl">เวลางานปกติของคนนี้ · เว้นว่าง = ใช้เวลางานบริษัท ' + esc(S.start) + '–' + esc(S.end) + '</span><div class="row">' + f('fs1', 'เข้างาน', e.shiftStart) + f('fs2', 'เลิกงาน', e.shiftEnd) + '</div></div>' +
+  var own = TC.util.customSchedule(e), def = TC.util.scheduleText({}, S);
+  return '<div class="field"><span class="lbl">เวลางานของคนนี้</span><div class="seg" id="smode"><button type="button" data-m="def" aria-pressed="' + !own + '">ใช้เวลามาตรฐานบริษัท</button><button type="button" data-m="own" aria-pressed="' + own + '">ตั้งเฉพาะคนนี้</button></div>' +
+    '<div class="small muted" id="sdef"' + (own ? ' hidden' : '') + '>ระบบจะใช้เวลามาตรฐาน: <b>' + esc(def) + '</b> และเปลี่ยนตามเมื่อแก้ค่ามาตรฐานในหน้าตั้งค่า</div></div><div id="sown"' + (own ? '' : ' hidden') + '>' +
+'<div class="field"><span class="lbl">เวลางานปกติของคนนี้ · เว้นว่าง = ใช้เวลางานบริษัท ' + esc(S.start) + '–' + esc(S.end) + '</span><div class="row">' + f('fs1', 'เข้างาน', e.shiftStart) + f('fs2', 'เลิกงาน', e.shiftEnd) + '</div></div>' +
     '<div class="field"><span class="lbl">ตารางรายสัปดาห์ · ติ๊กวันที่ทำงาน · ใส่เวลาเฉพาะวันที่ต่างจากปกติ (เช่น พุธ เลิก 12:20)</span><div class="card tbl-wrap"><table class="sched"><thead><tr><th>วัน</th><th class="c">ทำงาน</th><th>เข้างาน</th><th>เลิกงาน</th></tr></thead><tbody>' +
     [1, 2, 3, 4, 5, 6, 0].map(function (d) {
       var o = dt[d] || {};
       return '<tr><td><b>' + A.TH_DF[d] + '</b></td><td class="c"><input type="checkbox" data-wd="' + d + '"' + (cur.indexOf(d) >= 0 ? ' checked' : '') + ' aria-label="ทำงานวัน' + A.TH_DF[d] + '"></td>' +
         '<td class="inline-edit"><input type="time" data-ds="' + d + '" value="' + esc(o.start || '') + '" aria-label="เข้างานวัน' + A.TH_DF[d] + '"></td><td class="inline-edit"><input type="time" data-de="' + d + '" value="' + esc(o.end || '') + '" aria-label="เลิกงานวัน' + A.TH_DF[d] + '"></td></tr>';
-    }).join('') + '</tbody></table></div><span class="small muted">ช่องเวลาว่าง = ใช้เวลางานปกติของคนนี้</span></div>';
+    }).join('') + '</tbody></table></div><span class="small muted">ช่องเวลาว่าง = ใช้เวลางานปกติของคนนี้</span></div></div>';
+}
+function bindScheduleMode() {
+  var bs = document.querySelectorAll('#smode [data-m]');
+  bs.forEach(function (b) { b.onclick = function () { bs.forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); }); var own = b.dataset.m === 'own'; document.getElementById('sown').hidden = !own; document.getElementById('sdef').hidden = own; }; });
 }
 function readSchedule() {
   var S = INFO.settings, days = [], parts = [];
+  var m = document.querySelector('#smode [aria-pressed="true"]');
+  if (m && m.dataset.m === 'def') return { def: true, workdays: '', dayTimes: '' };
   var base = { start: document.getElementById('fs1').value || S.start, end: document.getElementById('fs2').value || S.end };
   document.querySelectorAll('[data-wd]').forEach(function (c) {
     var d = +c.dataset.wd; if (!c.checked) return; days.push(d);
@@ -474,9 +483,10 @@ function empForm(e) {
     '<div class="row">' + f('fsd', 'วันเริ่มงาน (เว้นว่างได้ · ก่อนวันนี้ไม่นับขาด)', e.startDate, 'type="date"') + '</div>' +
     f('fnote', 'หมายเหตุ (เห็นเฉพาะแอดมิน)', e.note) +
     '<div id="eerr"></div><button class="btn primary block" type="submit">บันทึก</button></form>', 'wide');
+  bindScheduleMode();
   document.getElementById('ef').onsubmit = function (ev) {
     ev.preventDefault(); var g = function (id) { return document.getElementById(id).value; };
-    api('saveEmp', { emp: { id: e.id, code: g('fc'), name: g('fn'), gender: g('fg'), position: g('fp'), phone: g('fph'), email: g('fe'), qPersonal: g('q1'), qSick: g('q2'), qVacation: g('q3'), qMaternity: g('q4'), note: g('fnote'), startDate: g('fsd'), shiftStart: g('fs1'), shiftEnd: g('fs2'), satStart: '', satEnd: '', workdays: readSchedule().workdays, dayTimes: readSchedule().dayTimes } })
+    api('saveEmp', { emp: { id: e.id, code: g('fc'), name: g('fn'), gender: g('fg'), position: g('fp'), phone: g('fph'), email: g('fe'), qPersonal: g('q1'), qSick: g('q2'), qVacation: g('q3'), qMaternity: g('q4'), note: g('fnote'), startDate: g('fsd'), shiftStart: readSchedule().def ? '' : g('fs1'), shiftEnd: readSchedule().def ? '' : g('fs2'), satStart: '', satEnd: '', workdays: readSchedule().workdays, dayTimes: readSchedule().dayTimes } })
       .then(function () { A.closeModal(); A.toast('บันทึกแล้ว'); go('emps'); }).catch(function (x) { err('eerr', x); });
   };
 }
@@ -600,8 +610,19 @@ function pHol(el, banner) {
 }
 
 /* ================= ตั้งค่า & QR ================= */
+/** ตาราง "เวลางานที่ระบบใช้คำนวณจริง" ของทุกคน: บอกชัดว่าใครใช้ค่ามาตรฐาน ใครตั้งเฉพาะคน */
+function schedTable(list, o) {
+  var def = TC.util.scheduleText({}, o);
+  var rows = list.filter(function (e) { return e.active; }).map(function (e) {
+    var tag = !e.custom ? A.pill('ok', 'ใช้ค่ามาตรฐาน') : e.schedule === def ? A.pill('', 'ตั้งเฉพาะคน · เท่ากับมาตรฐาน') : A.pill('leave', 'ตั้งเฉพาะคน');
+    return '<tr><td>' + esc(e.name) + '</td><td class="small" style="white-space:normal">' + esc(e.schedule) + '</td><td>' + tag + '</td></tr>';
+  }).join('');
+  return '<div class="field"><span class="lbl">เวลางานที่ระบบใช้คำนวณสาย/ออกก่อน/ขาด ของแต่ละคน</span><div class="tbl-wrap" style="border:1px solid var(--line);border-radius:12px"><table><thead><tr><th>พนักงาน</th><th>เวลางาน</th><th>ที่มา</th></tr></thead><tbody>' +
+    (rows || '<tr><td colspan="3" class="empty">ยังไม่มีพนักงาน</td></tr>') + '</tbody></table></div>' +
+    '<p class="small muted" style="margin-top:6px">แก้เวลารายคนได้ที่ <a href="#emps" data-goemps>เมนูพนักงาน → แก้ไข</a> · คนที่ "ตั้งเฉพาะคน" จะไม่เปลี่ยนตามเมื่อแก้ค่ามาตรฐาน</p></div>';
+}
 function pSet(el, banner) {
-  return Promise.all([api('settings'), api('qr')]).then(function (res) {
+  return Promise.all([api('settings'), api('qr'), api('employees')]).then(function (res) {
     INFO = res[0]; var o = INFO.settings, qr = res[1]; var fixedQr = qr.mode !== 'daily';
     var f = function (id, label, val, attr) { return '<div class="field"><label for="' + id + '">' + label + '</label><input id="' + id + '" value="' + esc(val === undefined ? '' : val) + '" ' + (attr || '') + '></div>'; };
     el.innerHTML = banner + head('ตั้งค่า & QR Code', 'จุดลงเวลา เวลาทำงาน สิทธิ์ลาเริ่มต้น และบัญชีแอดมิน') +
@@ -609,8 +630,11 @@ function pSet(el, banner) {
       '<div class="row">' + f('s1', 'ชื่อบริษัท', o.company) + f('s2', 'ชื่อสถานที่', o.office) + '</div>' +
       '<div class="row">' + f('s3', 'Latitude', o.lat, 'type="number" step="0.000001"') + f('s4', 'Longitude', o.lng, 'type="number" step="0.000001"') + f('s5', 'รัศมีที่อนุญาต (เมตร)', o.radius, 'type="number" min="50" step="50"') + '</div>' +
       '<div class="row" style="align-items:center"><button class="btn ghost sm" type="button" id="here" style="flex:0 0 auto">ใช้ตำแหน่งที่ฉันยืนอยู่ตอนนี้</button><a href="https://www.google.com/maps?q=' + o.lat + ',' + o.lng + '" target="_blank" rel="noopener" class="small">ดูบน Google Maps ↗</a></div>' +
-      '<h3 style="font-size:16px;margin-top:6px">เวลาทำงาน</h3><div class="row">' + f('s6', 'เวลาเข้างานบริษัท', o.start, 'type="time"') + f('s7', 'เวลาเลิกงานบริษัท', o.end, 'type="time"') + f('s8', 'ผ่อนผันสาย (นาที)', o.grace, 'type="number" min="0"') + '</div>' +
-      '<div class="field"><span class="lbl">วันทำงาน</span><div class="days-pick">' + [1, 2, 3, 4, 5, 6, 0].map(function (i) { return '<label><input type="checkbox" value="' + i + '"' + (o.workdays.indexOf(i) >= 0 ? ' checked' : '') + '> ' + A.TH_D[i] + '</label>'; }).join('') + '</div></div>' +
+      '<h3 style="font-size:16px;margin-top:6px">เวลาทำงานมาตรฐานของบริษัท</h3>' +
+      '<div class="note small">ค่านี้ใช้กับ <b>พนักงานที่ไม่ได้ตั้งเวลาเฉพาะคน</b> เท่านั้น ถ้าตั้งเวลาเฉพาะคนไว้ที่เมนูพนักงาน (เช่น เลขาฯ 09:20–18:20 พุธเลิก 12:20, วิศวกรที่ทำจันทร์–เสาร์) ระบบจะใช้เวลาของคนนั้นแทนเสมอ · ดูเวลาที่ใช้คำนวณจริงของแต่ละคนได้ในตารางด้านล่าง</div>' +
+      '<div class="row">' + f('s6', 'เข้างาน (มาตรฐาน)', o.start, 'type="time"') + f('s7', 'เลิกงาน (มาตรฐาน)', o.end, 'type="time"') + f('s8', 'ผ่อนผันสาย (นาที) · ใช้กับทุกคน', o.grace, 'type="number" min="0"') + '</div>' +
+      '<div class="field"><span class="lbl">วันทำงาน (มาตรฐาน)</span><div class="days-pick">' + [1, 2, 3, 4, 5, 6, 0].map(function (i) { return '<label><input type="checkbox" value="' + i + '"' + (o.workdays.indexOf(i) >= 0 ? ' checked' : '') + '> ' + A.TH_D[i] + '</label>'; }).join('') + '</div></div>' +
+      schedTable(res[2], o) +
       '<h3 style="font-size:16px;margin-top:6px">สิทธิ์ลาเริ่มต้นต่อปี (วัน)</h3><div class="row">' + f('q1', 'ลากิจ', o.qPersonal, 'type="number" min="0"') + f('q2', 'ลาป่วย', o.qSick, 'type="number" min="0"') + f('q3', 'ลาพักร้อน', o.qVacation, 'type="number" min="0"') + f('q4', 'ลาคลอด', o.qMaternity, 'type="number" min="0"') + '</div>' +
       '<h3 style="font-size:16px;margin-top:6px">ยืนยันตัวตนตอนลงเวลา</h3>' +
       '<label class="hrow small" style="gap:8px"><input type="checkbox" id="sx1"' + (o.selfie !== false ? ' checked' : '') + '> บังคับถ่ายเซลฟี่ด้วยกล้องหน้าทุกครั้งที่ลงเวลา (เลือกรูปจากอัลบั้มไม่ได้)</label>' +
@@ -636,6 +660,7 @@ function pSet(el, banner) {
       '<div id="aerr"></div><button class="btn ghost" type="submit">เปลี่ยนบัญชีแอดมิน</button></form></div></div>';
     var drawQr = function (box, size) { box.innerHTML = ''; try { new QRCode(box, { text: qr.payload, width: size, height: size, colorDark: '#0d0b0a', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M }); } catch (e) { box.textContent = 'สร้าง QR ไม่สำเร็จ'; } };
     drawQr(document.getElementById('qr'), 220);
+    el.querySelectorAll('[data-goemps]').forEach(function (a) { a.onclick = function (ev) { ev.preventDefault(); go('emps'); }; });
     document.getElementById('prt').onclick = function () {
       var box = document.createElement('div'); box.id = 'printqr';
       box.innerHTML = '<div class="pq-brand"><span class="logo" role="img" aria-label="TESR"></span><div><b>' + esc(o.company) + '</b><small>' + esc(o.office) + '</small></div></div>' +
