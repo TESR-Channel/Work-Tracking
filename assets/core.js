@@ -1,0 +1,520 @@
+/* =====================================================================
+ * TESR Time Clock — core logic
+ * ใช้ไฟล์เดียวกันทั้งใน Google Apps Script (หลังบ้านจริง) และโหมดทดลองในเบราว์เซอร์
+ * ทุกคำสั่งผ่าน TC.handle(adapter, params) — adapter คือที่เก็บข้อมูล (Google Sheet หรือ localStorage)
+ * ===================================================================== */
+var TC = (function () {
+  var TABLES = {
+    EMP: { name: 'Employees', cols: ['id', 'code', 'name', 'gender', 'email', 'phone', 'position', 'photo', 'active', 'username', 'passHash', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note'] },
+    REC: { name: 'Records', cols: ['date', 'empId', 'code', 'name', 'in', 'out', 'lateMin', 'inDist', 'outDist', 'note', 'updatedAt'] },
+    LEAVE: { name: 'Leaves', cols: ['id', 'empId', 'code', 'name', 'type', 'start', 'end', 'part', 'days', 'reason', 'status', 'createdAt', 'decidedAt', 'decidedBy', 'adminNote'] },
+    ADJ: { name: 'Adjustments', cols: ['id', 'empId', 'code', 'name', 'date', 'in', 'out', 'reason', 'status', 'createdAt', 'decidedAt', 'decidedBy', 'adminNote'] },
+    HOL: { name: 'Holidays', cols: ['date', 'name'] }
+  };
+  var LEAVE_TYPES = { personal: 'ลากิจ', sick: 'ลาป่วย', vacation: 'ลาพักร้อน', maternity: 'ลาคลอด', unpaid: 'ลาไม่รับค่าจ้าง' };
+  var QUOTA = { personal: 'qPersonal', sick: 'qSick', vacation: 'qVacation', maternity: 'qMaternity' };
+  var PART = { full: 'เต็มวัน', am: 'ครึ่งวันเช้า', pm: 'ครึ่งวันบ่าย' };
+  var STATUS = { pending: 'รออนุมัติ', approved: 'อนุมัติแล้ว', rejected: 'ไม่อนุมัติ', cancelled: 'ยกเลิกแล้ว' };
+  var DEFAULTS = {
+    company: 'TESR Co., Ltd.', office: 'TESR Play Ground', lat: '13.8621', lng: '100.5144', radius: '1000',
+    start: '09:00', end: '18:00', grace: '0', workdays: '1,2,3,4,5', appUrl: '',
+    qPersonal: '7', qSick: '30', qVacation: '6', qMaternity: '0',
+    adminUser: 'admin', adminHash: ''
+  };
+  var DEFAULT_ADMIN_PASSWORD = 'tesr1234';
+  var PUBLIC_SETTINGS = ['company', 'office', 'lat', 'lng', 'radius', 'start', 'end', 'grace', 'workdays', 'appUrl', 'qPersonal', 'qSick', 'qVacation', 'qMaternity'];
+  var WRITES = {
+    login: 1, register: 1, punch: 1, photo: 1, changePassword: 1, leaveCreate: 1, leaveCancel: 1, adjCreate: 1,
+    decide: 1, saveEmp: 1, delEmp: 1, resetLogin: 1, importEmps: 1, saveHoliday: 1, delHoliday: 1,
+    saveSettings: 1, changeAdmin: 1, editRecord: 1, buildMonth: 1
+  };
+
+  /* ---------- small helpers (pure) ---------- */
+  function E(msg, code) { var e = new Error(msg); e.code = code || ''; return e; }
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function toMin(t) { if (!t) return 0; var p = String(t).split(':'); return (+p[0]) * 60 + (+p[1]); }
+  function num(v, d) { if (v === '' || v === null || v === undefined) return d; var n = Number(v); return isFinite(n) ? n : d; }
+  function str(v) { return v === null || v === undefined ? '' : String(v).trim(); }
+  function digits(v) { return str(v).replace(/\D/g, ''); }
+  function parse(s) { var p = s.split('-'); return new Date(Date.UTC(+p[0], +p[1] - 1, +p[2])); }
+  function ymd(d) { return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()); }
+  function dow(s) { return parse(s).getUTCDay(); }
+  function addDays(s, n) { var d = parse(s); d.setUTCDate(d.getUTCDate() + n); return ymd(d); }
+  function range(a, b) { var out = []; if (!isDate(a) || !isDate(b)) return out; for (var d = a; d <= b && out.length < 400; d = addDays(d, 1)) out.push(d); return out; }
+  function monthDays(m) { var p = m.split('-'); var n = new Date(Date.UTC(+p[0], +p[1], 0)).getUTCDate(); var out = []; for (var i = 1; i <= n; i++) out.push(m + '-' + pad(i)); return out; }
+  function isDate(s) { return /^\d{4}-\d{2}-\d{2}$/.test(s || ''); }
+  function isTime(s) { return /^\d{2}:\d{2}$/.test(s || ''); }
+  function isMonth(s) { return /^\d{4}-\d{2}$/.test(s || ''); }
+  function haversine(a, b, c, d) {
+    var R = 6371000, t = function (x) { return x * Math.PI / 180; }, dl = t(c - a), dg = t(d - b);
+    var h = Math.pow(Math.sin(dl / 2), 2) + Math.cos(t(a)) * Math.cos(t(c)) * Math.pow(Math.sin(dg / 2), 2);
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+  function fmtDist(m) { return m >= 1000 ? (m / 1000).toFixed(2) + ' กม.' : Math.round(m) + ' ม.'; }
+  function lateOf(t, S) { return t ? Math.max(0, toMin(t) - toMin(S.start) - (S.grace || 0)) : 0; }
+  function overlaps(a1, a2, b1, b2) { return a1 <= b2 && b1 <= a2; }
+
+  /* ---------- settings ---------- */
+  function settings(A) {
+    var raw = A.getSettings(), s = {};
+    for (var k in DEFAULTS) s[k] = (raw[k] !== undefined && str(raw[k]) !== '') ? str(raw[k]) : DEFAULTS[k];
+    s.lat = num(s.lat, 0); s.lng = num(s.lng, 0); s.radius = num(s.radius, 1000); s.grace = num(s.grace, 0);
+    s.workdays = String(s.workdays).split(',').filter(function (x) { return x !== ''; }).map(Number);
+    ['qPersonal', 'qSick', 'qVacation', 'qMaternity'].forEach(function (k) { s[k] = num(s[k], 0); });
+    return s;
+  }
+  function pubSettings(S) { var o = {}; PUBLIC_SETTINGS.forEach(function (k) { o[k] = S[k]; }); return o; }
+
+  /* ---------- data access ---------- */
+  function emps(A) { return A.rows(TABLES.EMP); }
+  function isActive(e) { return String(e.active).toUpperCase() !== 'FALSE'; }
+  function pubEmp(e) { return { id: e.id, code: e.code, name: e.name, gender: e.gender, position: e.position, photo: e.photo, email: e.email, phone: e.phone }; }
+  function recObj(r) { return { date: r.date, empId: r.empId, in: r.in, out: r.out, lateMin: num(r.lateMin, 0), inDist: num(r.inDist, null), outDist: num(r.outDist, null), note: r.note || '' }; }
+  function leaveObj(l) { return { id: l.id, empId: l.empId, code: l.code, name: l.name, type: l.type, start: l.start, end: l.end, part: l.part || 'full', days: num(l.days, 0), reason: l.reason, status: l.status, createdAt: l.createdAt, decidedAt: l.decidedAt, adminNote: l.adminNote || '' }; }
+  function adjObj(a) { return { id: a.id, empId: a.empId, code: a.code, name: a.name, date: a.date, in: a.in, out: a.out, reason: a.reason, status: a.status, createdAt: a.createdAt, decidedAt: a.decidedAt, adminNote: a.adminNote || '' }; }
+  function holidays(A) { return A.rows(TABLES.HOL).filter(function (h) { return isDate(h.date); }).map(function (h) { return { date: h.date, name: h.name }; }); }
+  function holMap(A) { var m = {}; holidays(A).forEach(function (h) { m[h.date] = h.name || 'วันหยุด'; }); return m; }
+  function isWork(c, d) { if (!c._hol) c._hol = holMap(c.A); return c.S.workdays.indexOf(dow(d)) >= 0 && !c._hol[d]; }
+  function leaveDays(c, start, end, part) {
+    if (part !== 'full') return isWork(c, start) ? 0.5 : 0;
+    return range(start, end).filter(function (d) { return isWork(c, d); }).length;
+  }
+  function quotaOf(e, S, type) { var col = QUOTA[type]; return col ? num(e[col], S[col]) : null; }
+  function usage(c, e, year) {
+    var out = {};
+    Object.keys(LEAVE_TYPES).forEach(function (t) { out[t] = { label: LEAVE_TYPES[t], quota: quotaOf(e, c.S, t), used: 0, pending: 0 }; });
+    c.A.rows(TABLES.LEAVE).forEach(function (l) {
+      if (l.empId !== e.id || String(l.start).slice(0, 4) !== String(year) || !out[l.type]) return;
+      if (l.status === 'approved') out[l.type].used += num(l.days, 0);
+      if (l.status === 'pending') out[l.type].pending += num(l.days, 0);
+    });
+    Object.keys(out).forEach(function (t) { var u = out[t]; u.left = u.quota === null ? null : u.quota - u.used; });
+    return out;
+  }
+  function stamp(e) { return { empId: e.id, code: e.code, name: e.name }; }
+  function merge(a, b) { var o = {}, k; for (k in a) o[k] = a[k]; for (k in b) o[k] = b[k]; return o; }
+
+  /* ---------- auth ---------- */
+  function ver(A, h) { return A.hmac('v|' + (h || '')).slice(0, 8); }
+  function sign(c, role, id, v, hours) {
+    var p = [role, id, v, c.now.ms + hours * 3600000].join('.');
+    return p + '.' + c.A.hmac(p);
+  }
+  function verify(c, tok) {
+    var parts = str(tok).split('.');
+    if (parts.length !== 5) return null;
+    var p = parts.slice(0, 4).join('.');
+    if (c.A.hmac(p) !== parts[4] || +parts[3] < c.now.ms) return null;
+    if (parts[0] === 'admin') return parts[2] === ver(c.A, c.S.adminHash) ? { role: 'admin', id: 'admin' } : null;
+    var e = emps(c.A).filter(function (x) { return x.id === parts[1]; })[0];
+    if (!e || !isActive(e) || parts[2] !== ver(c.A, e.passHash)) return null;
+    return { role: 'emp', id: e.id, emp: e };
+  }
+  function hashPw(A, pw) { var salt = A.uuid(); return salt + '$' + A.sha256(salt + '|' + pw); }
+  function checkPw(A, stored, pw) { var s = str(stored), i = s.indexOf('$'); return i > 0 && A.sha256(s.slice(0, i) + '|' + pw) === s.slice(i + 1); }
+  function validUser(u) { if (!/^[a-z0-9._-]{3,30}$/.test(u)) throw E('ชื่อผู้ใช้ต้องเป็น a-z, 0-9, . _ - ยาว 3–30 ตัว'); }
+  function validPw(pw) { if (String(pw).length < 6) throw E('รหัสผ่านต้องยาวอย่างน้อย 6 ตัวอักษร'); }
+  function usernameTaken(c, u, exceptId) {
+    if (u === str(c.S.adminUser).toLowerCase()) return true;
+    return emps(c.A).some(function (e) { return e.id !== exceptId && str(e.username).toLowerCase() === u; });
+  }
+  function throttle(c, key) {
+    var n = num(c.A.cacheGet(key), 0);
+    if (n >= 5) throw E('ลองผิดหลายครั้งเกินไป กรุณารอ 15 นาทีแล้วลองใหม่');
+    return function () { c.A.cachePut(key, String(n + 1), 900); };
+  }
+  function qrToken(c, date) { return c.A.hmac('qr|' + date).slice(0, 12); }
+
+  /* =================== public actions =================== */
+  function login(c) {
+    var u = str(c.p.username).toLowerCase(), pw = String(c.p.password || '');
+    if (!u || !pw) throw E('กรอกชื่อผู้ใช้และรหัสผ่าน');
+    var fail = throttle(c, 'fail:' + u);
+    if (c.p.as === 'admin') {
+      var ok = u === str(c.S.adminUser).toLowerCase() && (c.S.adminHash ? checkPw(c.A, c.S.adminHash, pw) : pw === DEFAULT_ADMIN_PASSWORD);
+      if (!ok) { fail(); throw E('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง'); }
+      return { role: 'admin', token: sign(c, 'admin', 'admin', ver(c.A, c.S.adminHash), 12), mustChange: !c.S.adminHash, name: c.S.adminUser };
+    }
+    var e = emps(c.A).filter(function (x) { return isActive(x) && str(x.username).toLowerCase() === u; })[0];
+    if (!e || !checkPw(c.A, e.passHash, pw)) { fail(); throw E('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง'); }
+    return { role: 'emp', token: sign(c, 'emp', e.id, ver(c.A, e.passHash), 24 * 60), emp: pubEmp(e) };
+  }
+
+  /** ลงทะเบียนครั้งแรก: ยืนยันตัวตนด้วยรหัสพนักงาน + เบอร์โทรที่แอดมินบันทึกไว้ แล้วตั้ง username/password เอง */
+  function register(c) {
+    var code = str(c.p.code).toLowerCase(), u = str(c.p.username).toLowerCase(), pw = String(c.p.password || '');
+    var fail = throttle(c, 'reg:' + code);
+    var e = emps(c.A).filter(function (x) { return isActive(x) && str(x.code).toLowerCase() === code; })[0];
+    if (!e || !digits(e.phone) || digits(e.phone) !== digits(c.p.phone)) { fail(); throw E('รหัสพนักงานหรือเบอร์โทรไม่ตรงกับข้อมูลในระบบ'); }
+    if (e.username) throw E('รหัสพนักงานนี้ตั้งบัญชีแล้ว หากลืมรหัสผ่านให้แจ้งแอดมินรีเซ็ต');
+    validUser(u); validPw(pw);
+    if (usernameTaken(c, u, e.id)) throw E('ชื่อผู้ใช้นี้มีคนใช้แล้ว');
+    var h = hashPw(c.A, pw);
+    c.A.update(TABLES.EMP, e, { username: u, passHash: h });
+    e.passHash = h;
+    return { role: 'emp', token: sign(c, 'emp', e.id, ver(c.A, h), 24 * 60), emp: pubEmp(e) };
+  }
+
+  /* =================== employee actions =================== */
+  function myEmp(c) { return c.sess.emp; }
+  function todayRec(c, empId) {
+    var r = c.A.rows(TABLES.REC).filter(function (x) { return x.empId === empId && x.date === c.now.date; })[0];
+    return r ? recObj(r) : null;
+  }
+  function me(c) {
+    var e = myEmp(c);
+    return {
+      emp: pubEmp(e), username: e.username, settings: pubSettings(c.S), today: c.now.date, now: c.now.time,
+      rec: todayRec(c, e.id), usage: usage(c, e, c.now.date.slice(0, 4)),
+      pending: c.A.rows(TABLES.LEAVE).filter(function (l) { return l.empId === e.id && l.status === 'pending'; }).length +
+        c.A.rows(TABLES.ADJ).filter(function (a) { return a.empId === e.id && a.status === 'pending'; }).length
+    };
+  }
+  function myMonth(c) {
+    var e = myEmp(c), m = str(c.p.month);
+    if (!isMonth(m)) throw E('เดือนไม่ถูกต้อง');
+    var data = monthData(c, m, [e]);
+    data.report = monthReport(m, [e], data.records, data.leaves, data.holidays, c.S, c.now.date)[0];
+    data.adjustments = c.A.rows(TABLES.ADJ).filter(function (a) { return a.empId === e.id && String(a.date).indexOf(m) === 0; }).map(adjObj);
+    return data;
+  }
+  function punch(c) {
+    var e = myEmp(c), S = c.S, date = c.now.date, time = c.now.time;
+    if (str(c.p.token2) !== qrToken(c, date)) throw E('QR Code ไม่ถูกต้องหรือหมดอายุ (ใช้ได้เฉพาะ QR ของวันนี้)');
+    var lat = Number(c.p.lat), lng = Number(c.p.lng);
+    if (!isFinite(lat) || !isFinite(lng) || (!lat && !lng)) throw E('ไม่ได้รับพิกัด GPS จากมือถือ');
+    var dist = Math.round(haversine(lat, lng, S.lat, S.lng));
+    if (dist > S.radius) throw E('อยู่ห่างออฟฟิศ ' + fmtDist(dist) + ' เกินรัศมีที่อนุญาต ' + fmtDist(S.radius));
+    var r = c.A.rows(TABLES.REC).filter(function (x) { return x.empId === e.id && x.date === date; })[0];
+    if (r) {
+      if (r.out) throw E('วันนี้ลงเวลาเข้า–ออกครบแล้ว');
+      c.A.update(TABLES.REC, r, { out: time, outDist: String(dist), updatedAt: c.now.iso });
+      return { kind: 'out', rec: recObj(merge(r, { out: time, outDist: dist })) };
+    }
+    var rec = merge(stamp(e), { date: date, in: time, out: '', lateMin: String(lateOf(time, S)), inDist: String(dist), outDist: '', note: '', updatedAt: c.now.iso });
+    c.A.insert(TABLES.REC, rec);
+    return { kind: 'in', rec: recObj(rec) };
+  }
+  function photo(c) {
+    var e = myEmp(c), m = String(c.p.data || '').match(/^data:(image\/\w+);base64,(.+)$/);
+    if (!m) throw E('ไฟล์รูปไม่ถูกต้อง');
+    if (m[2].length > 900000) throw E('รูปใหญ่เกินไป');
+    var url = c.A.savePhoto(e, m[1], m[2], c.p.data);
+    c.A.update(TABLES.EMP, e, { photo: url });
+    return { url: url };
+  }
+  function changePassword(c) {
+    var e = myEmp(c);
+    if (!checkPw(c.A, e.passHash, String(c.p.old || ''))) throw E('รหัสผ่านเดิมไม่ถูกต้อง');
+    validPw(c.p.password);
+    var h = hashPw(c.A, String(c.p.password));
+    c.A.update(TABLES.EMP, e, { passHash: h });
+    return { token: sign(c, 'emp', e.id, ver(c.A, h), 24 * 60) };
+  }
+  function leaveCreate(c) {
+    var e = myEmp(c), type = str(c.p.type), start = str(c.p.start), end = str(c.p.end) || start, part = str(c.p.part) || 'full', reason = str(c.p.reason);
+    if (!LEAVE_TYPES[type]) throw E('เลือกประเภทการลา');
+    if (!isDate(start) || !isDate(end) || end < start) throw E('ช่วงวันที่ไม่ถูกต้อง');
+    if (!PART[part]) throw E('เลือกเต็มวันหรือครึ่งวัน');
+    if (part !== 'full' && end !== start) throw E('ลาครึ่งวันได้ทีละ 1 วัน');
+    if (reason.length < 2) throw E('กรุณาระบุเหตุผลการลา');
+    if (start < addDays(c.now.date, -30)) throw E('ยื่นลาย้อนหลังได้ไม่เกิน 30 วัน');
+    if (range(start, end).length > 120) throw E('ช่วงลายาวเกินไป');
+    var days = leaveDays(c, start, end, part);
+    if (!days) throw E('ช่วงวันที่เลือกไม่มีวันทำงาน');
+    var clash = c.A.rows(TABLES.LEAVE).filter(function (l) {
+      return l.empId === e.id && (l.status === 'pending' || l.status === 'approved') && overlaps(start, end, l.start, l.end) &&
+        !(part !== 'full' && l.part !== 'full' && l.part !== part && start === l.start);
+    })[0];
+    if (clash) throw E('มีใบลาช่วงนี้อยู่แล้ว (' + LEAVE_TYPES[clash.type] + ' ' + clash.start + ')');
+    var u = usage(c, e, start.slice(0, 4))[type];
+    if (u.quota !== null && type !== 'sick' && u.used + u.pending + days > u.quota)
+      throw E(u.label + ' เหลือ ' + Math.max(0, u.quota - u.used - u.pending) + ' วัน (รวมที่รออนุมัติ) ไม่พอสำหรับ ' + days + ' วัน');
+    var l = merge(stamp(e), { id: 'L' + c.A.uuid(), type: type, start: start, end: end, part: part, days: String(days), reason: reason, status: 'pending', createdAt: c.now.iso, decidedAt: '', decidedBy: '', adminNote: '' });
+    c.A.insert(TABLES.LEAVE, l);
+    return leaveObj(l);
+  }
+  function leaveCancel(c) {
+    var e = myEmp(c), l = c.A.rows(TABLES.LEAVE).filter(function (x) { return x.id === str(c.p.id) && x.empId === e.id; })[0];
+    if (!l) throw E('ไม่พบใบลา');
+    if (l.status === 'approved' && l.start <= c.now.date) throw E('ใบลาที่อนุมัติแล้วและเริ่มไปแล้วยกเลิกเองไม่ได้ ติดต่อแอดมิน');
+    if (l.status !== 'pending' && l.status !== 'approved') throw E('ใบลานี้ยกเลิกไม่ได้');
+    c.A.update(TABLES.LEAVE, l, { status: 'cancelled', decidedAt: c.now.iso, decidedBy: 'employee' });
+    return true;
+  }
+  function adjCreate(c) {
+    var e = myEmp(c), date = str(c.p.date), tin = str(c.p.in), tout = str(c.p.out), reason = str(c.p.reason);
+    if (!isDate(date) || date > c.now.date) throw E('เลือกวันที่ที่ผ่านมาแล้วหรือวันนี้');
+    if (date < addDays(c.now.date, -45)) throw E('ขอแก้เวลาได้ย้อนหลังไม่เกิน 45 วัน');
+    if ((tin && !isTime(tin)) || (tout && !isTime(tout)) || (!tin && !tout)) throw E('ระบุเวลาเข้าและ/หรือเวลาออกที่ถูกต้อง');
+    if (tin && tout && tout <= tin) throw E('เวลาออกต้องหลังเวลาเข้า');
+    if (reason.length < 2) throw E('กรุณาระบุเหตุผล');
+    if (c.A.rows(TABLES.ADJ).some(function (a) { return a.empId === e.id && a.date === date && a.status === 'pending'; })) throw E('มีคำขอแก้เวลาของวันนี้รออนุมัติอยู่แล้ว');
+    var a = merge(stamp(e), { id: 'A' + c.A.uuid(), date: date, in: tin, out: tout, reason: reason, status: 'pending', createdAt: c.now.iso, decidedAt: '', decidedBy: '', adminNote: '' });
+    c.A.insert(TABLES.ADJ, a);
+    return adjObj(a);
+  }
+  function myRequests(c) {
+    var e = myEmp(c);
+    var lv = c.A.rows(TABLES.LEAVE).filter(function (l) { return l.empId === e.id; }).map(leaveObj);
+    var aj = c.A.rows(TABLES.ADJ).filter(function (a) { return a.empId === e.id; }).map(adjObj);
+    var by = function (a, b) { return String(b.createdAt).localeCompare(String(a.createdAt)); };
+    return { leaves: lv.sort(by).slice(0, 60), adjustments: aj.sort(by).slice(0, 60), usage: usage(c, e, c.now.date.slice(0, 4)) };
+  }
+
+  /* =================== admin actions =================== */
+  function monthData(c, m, list) {
+    var ids = {}; list.forEach(function (e) { ids[e.id] = 1; });
+    var mStart = m + '-01', mEnd = monthDays(m).slice(-1)[0];
+    return {
+      month: m, today: c.now.date, settings: pubSettings(c.S),
+      employees: list.map(pubEmp),
+      records: c.A.rows(TABLES.REC).filter(function (r) { return ids[r.empId] && String(r.date).indexOf(m) === 0; }).map(recObj),
+      leaves: c.A.rows(TABLES.LEAVE).filter(function (l) { return ids[l.empId] && (l.status === 'approved' || l.status === 'pending') && overlaps(l.start, l.end, mStart, mEnd); }).map(leaveObj),
+      holidays: holidays(c.A).filter(function (h) { return h.date.indexOf(m) === 0; })
+    };
+  }
+  function employeesForMonth(c, m) {
+    var has = {};
+    c.A.rows(TABLES.REC).forEach(function (r) { if (String(r.date).indexOf(m) === 0) has[r.empId] = 1; });
+    return emps(c.A).filter(function (e) { return isActive(e) || has[e.id]; });
+  }
+  function adminToday(c) {
+    var list = emps(c.A).filter(isActive), d = c.now.date;
+    var data = monthData(c, d.slice(0, 7), list);
+    return {
+      today: d, now: c.now.time, settings: pubSettings(c.S), employees: data.employees,
+      records: data.records.filter(function (r) { return r.date === d; }),
+      leaves: data.leaves.filter(function (l) { return l.start <= d && l.end >= d; }),
+      holiday: (holMap(c.A))[d] || '',
+      pending: pendingList(c)
+    };
+  }
+  function adminMonth(c) {
+    var m = str(c.p.month); if (!isMonth(m)) throw E('เดือนไม่ถูกต้อง');
+    var list = employeesForMonth(c, m), data = monthData(c, m, list);
+    data.report = monthReport(m, list, data.records, data.leaves, data.holidays, c.S, c.now.date);
+    return data;
+  }
+  function pendingList(c) {
+    var lv = c.A.rows(TABLES.LEAVE).filter(function (l) { return l.status === 'pending'; }).map(leaveObj);
+    var aj = c.A.rows(TABLES.ADJ).filter(function (a) { return a.status === 'pending'; }).map(adjObj);
+    return { leaves: lv, adjustments: aj };
+  }
+  function requests(c) {
+    var all = str(c.p.filter) === 'all', list = emps(c.A), byId = {};
+    list.forEach(function (e) { byId[e.id] = e; });
+    var lv = c.A.rows(TABLES.LEAVE).filter(function (l) { return all || l.status === 'pending'; }).map(function (l) {
+      var o = leaveObj(l), e = byId[l.empId];
+      if (e) { var u = usage(c, e, String(l.start).slice(0, 4))[l.type]; o.quota = u ? { quota: u.quota, used: u.used, pending: u.pending } : null; o.photo = e.photo; }
+      return o;
+    });
+    var aj = c.A.rows(TABLES.ADJ).filter(function (a) { return all || a.status === 'pending'; }).map(function (a) {
+      var o = adjObj(a), r = c.A.rows(TABLES.REC).filter(function (x) { return x.empId === a.empId && x.date === a.date; })[0];
+      o.current = r ? { in: r.in, out: r.out } : null; o.photo = byId[a.empId] ? byId[a.empId].photo : '';
+      return o;
+    });
+    var by = function (a, b) { return String(b.createdAt).localeCompare(String(a.createdAt)); };
+    return { leaves: lv.sort(by).slice(0, all ? 300 : 999), adjustments: aj.sort(by).slice(0, all ? 300 : 999) };
+  }
+  function upsertRecord(c, e, date, tin, tout, note) {
+    var r = c.A.rows(TABLES.REC).filter(function (x) { return x.empId === e.id && x.date === date; })[0];
+    var patch = { updatedAt: c.now.iso, note: note };
+    if (tin) { patch.in = tin; patch.lateMin = String(lateOf(tin, c.S)); }
+    if (tout) patch.out = tout;
+    if (r) { c.A.update(TABLES.REC, r, patch); return; }
+    if (!tin) throw E('วันนี้ยังไม่มีเวลาเข้างาน ต้องระบุเวลาเข้าด้วย');
+    c.A.insert(TABLES.REC, merge(stamp(e), merge({ date: date, in: '', out: '', lateMin: '0', inDist: '', outDist: '', note: '' }, patch)));
+  }
+  function decide(c) {
+    var kind = str(c.p.kind), id = str(c.p.id), dec = str(c.p.decision), note = str(c.p.note);
+    if (dec !== 'approved' && dec !== 'rejected') throw E('ผลการพิจารณาไม่ถูกต้อง');
+    var t = kind === 'leave' ? TABLES.LEAVE : kind === 'adj' ? TABLES.ADJ : null;
+    if (!t) throw E('ประเภทคำขอไม่ถูกต้อง');
+    var row = c.A.rows(t).filter(function (x) { return x.id === id; })[0];
+    if (!row) throw E('ไม่พบคำขอ');
+    if (row.status !== 'pending' && !(row.status === 'approved' && dec === 'rejected')) throw E('คำขอนี้ถูกพิจารณาไปแล้ว');
+    if (kind === 'adj' && dec === 'approved') {
+      var e = emps(c.A).filter(function (x) { return x.id === row.empId; })[0];
+      if (!e) throw E('ไม่พบพนักงาน');
+      upsertRecord(c, e, row.date, row.in, row.out, 'แก้เวลาตามคำขอ: ' + row.reason);
+    }
+    c.A.update(t, row, { status: dec, decidedAt: c.now.iso, decidedBy: 'admin', adminNote: note });
+    return true;
+  }
+  function employees(c) {
+    var y = c.now.date.slice(0, 4);
+    return emps(c.A).map(function (e) {
+      var o = pubEmp(e);
+      o.active = isActive(e); o.username = e.username || ''; o.hasLogin = !!e.passHash;
+      o.qPersonal = e.qPersonal; o.qSick = e.qSick; o.qVacation = e.qVacation; o.qMaternity = e.qMaternity; o.note = e.note || '';
+      o.usage = usage(c, e, y);
+      return o;
+    });
+  }
+  var EMP_FIELDS = ['code', 'name', 'gender', 'email', 'phone', 'position', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note'];
+  function cleanEmp(src) {
+    var o = {};
+    EMP_FIELDS.forEach(function (k) { if (src[k] !== undefined) o[k] = str(src[k]); });
+    if (o.phone !== undefined) o.phone = digits(o.phone);
+    return o;
+  }
+  function saveEmp(c) {
+    var v = cleanEmp(c.p.emp || {}), id = str((c.p.emp || {}).id), list = emps(c.A);
+    if (!v.code || !v.name) throw E('ต้องกรอกรหัสพนักงานและชื่อ');
+    var dup = list.filter(function (e) { return isActive(e) && e.id !== id && str(e.code).toLowerCase() === v.code.toLowerCase(); })[0];
+    if (dup) throw E('รหัสพนักงาน ' + v.code + ' ซ้ำกับ ' + dup.name);
+    if (id) {
+      var e = list.filter(function (x) { return x.id === id; })[0];
+      if (!e) throw E('ไม่พบพนักงาน');
+      c.A.update(TABLES.EMP, e, v); return { id: id };
+    }
+    var n = merge({ id: 'e' + c.A.uuid(), active: 'TRUE', photo: '', username: '', passHash: '' }, v);
+    c.A.insert(TABLES.EMP, n); return { id: n.id };
+  }
+  function importEmps(c) {
+    var rows = c.p.rows || [], added = 0, updated = 0;
+    rows.forEach(function (src) {
+      var v = cleanEmp(src); if (!v.code || !v.name) return;
+      var e = emps(c.A).filter(function (x) { return str(x.code).toLowerCase() === v.code.toLowerCase(); })[0];
+      if (e) { c.A.update(TABLES.EMP, e, merge(v, { active: 'TRUE' })); updated++; }
+      else { c.A.insert(TABLES.EMP, merge({ id: 'e' + c.A.uuid(), active: 'TRUE', photo: '', username: '', passHash: '' }, v)); added++; }
+    });
+    return { added: added, updated: updated };
+  }
+  function findEmp(c, id) { var e = emps(c.A).filter(function (x) { return x.id === id; })[0]; if (!e) throw E('ไม่พบพนักงาน'); return e; }
+  function delEmp(c) { c.A.update(TABLES.EMP, findEmp(c, str(c.p.id)), { active: 'FALSE' }); return true; }
+  function restoreEmp(c) { c.A.update(TABLES.EMP, findEmp(c, str(c.p.id)), { active: 'TRUE' }); return true; }
+  function resetLogin(c) { c.A.update(TABLES.EMP, findEmp(c, str(c.p.id)), { username: '', passHash: '' }); return true; }
+  function listHolidays(c) { return holidays(c.A).sort(function (a, b) { return a.date.localeCompare(b.date); }); }
+  function saveHoliday(c) {
+    var list = c.p.items || [{ date: c.p.date, name: c.p.name }], n = 0;
+    list.forEach(function (h) {
+      var d = str(h.date), name = str(h.name) || 'วันหยุด';
+      if (!isDate(d)) return;
+      var ex = c.A.rows(TABLES.HOL).filter(function (x) { return x.date === d; })[0];
+      if (ex) c.A.update(TABLES.HOL, ex, { name: name }); else c.A.insert(TABLES.HOL, { date: d, name: name });
+      n++;
+    });
+    if (!n) throw E('วันที่ไม่ถูกต้อง');
+    return listHolidays(c);
+  }
+  function delHoliday(c) {
+    var ex = c.A.rows(TABLES.HOL).filter(function (x) { return x.date === str(c.p.date); })[0];
+    if (ex) c.A.remove(TABLES.HOL, ex);
+    return listHolidays(c);
+  }
+  function saveSettings(c) {
+    var s = c.p.settings || {};
+    PUBLIC_SETTINGS.forEach(function (k) { if (s[k] !== undefined) c.A.setSetting(k, Array.isArray(s[k]) ? s[k].join(',') : str(s[k])); });
+    return pubSettings(settings(c.A));
+  }
+  function changeAdmin(c) {
+    var old = String(c.p.old || ''), u = str(c.p.username || c.S.adminUser).toLowerCase(), pw = String(c.p.password || '');
+    var okOld = c.S.adminHash ? checkPw(c.A, c.S.adminHash, old) : old === DEFAULT_ADMIN_PASSWORD;
+    if (!okOld) throw E('รหัสผ่านเดิมไม่ถูกต้อง');
+    validUser(u); validPw(pw);
+    if (pw === DEFAULT_ADMIN_PASSWORD) throw E('ห้ามใช้รหัสผ่านเริ่มต้น');
+    if (emps(c.A).some(function (e) { return str(e.username).toLowerCase() === u; })) throw E('ชื่อผู้ใช้นี้ซ้ำกับบัญชีพนักงาน');
+    var h = hashPw(c.A, pw);
+    c.A.setSetting('adminUser', u); c.A.setSetting('adminHash', h);
+    return { token: sign(c, 'admin', 'admin', ver(c.A, h), 12), name: u };
+  }
+  function qr(c) {
+    var d = c.now.date, t = qrToken(c, d), base = str(c.S.appUrl).replace(/[?#].*$/, '');
+    return { date: d, token: t, payload: base ? base + '?t=' + t : 'TESR-ATTEND|' + d + '|' + t };
+  }
+  function editRecord(c) {
+    var e = findEmp(c, str(c.p.empId)), date = str(c.p.date), tin = str(c.p.in), tout = str(c.p.out), note = str(c.p.note) || 'แก้ไขโดยแอดมิน';
+    if (!isDate(date)) throw E('วันที่ไม่ถูกต้อง');
+    if ((tin && !isTime(tin)) || (tout && !isTime(tout))) throw E('รูปแบบเวลาไม่ถูกต้อง');
+    var r = c.A.rows(TABLES.REC).filter(function (x) { return x.empId === e.id && x.date === date; })[0];
+    if (!tin && !tout) { if (r) c.A.remove(TABLES.REC, r); return true; }
+    if (r && !tout) c.A.update(TABLES.REC, r, { out: '' });
+    upsertRecord(c, e, date, tin, tout, note);
+    return true;
+  }
+  function buildMonth(c) {
+    var m = str(c.p.month); if (!isMonth(m)) throw E('เดือนไม่ถูกต้อง');
+    var list = employeesForMonth(c, m), d = monthData(c, m, list);
+    var rep = monthReport(m, list, d.records, d.leaves, d.holidays, c.S, c.now.date);
+    return { url: c.A.buildMonthSheet ? c.A.buildMonthSheet(m, rep, c.S, c.now) : '' };
+  }
+
+  /* =================== monthly report (pure) =================== */
+  /**
+   * สถานะรายวัน: ok มา · late สาย · absent ขาด · leave ลาทั้งวัน · pending วันนี้ยังไม่เข้า
+   *              holiday วันหยุดบริษัท · off วันหยุดประจำสัปดาห์ · future วันที่ยังมาไม่ถึง
+   * ลาครึ่งวันเช้าที่อนุมัติแล้ว ไม่นับสายวันนั้น · ลาครึ่งวันแต่ไม่มาเลย นับขาด 0.5 วัน
+   */
+  function monthReport(m, empList, recs, lvs, hols, S, today) {
+    var hm = {}; hols.forEach(function (h) { hm[h.date] = h.name || 'วันหยุด'; });
+    var days = monthDays(m);
+    return empList.map(function (e) {
+      var rby = {}, lby = {};
+      recs.forEach(function (r) { if (r.empId === e.id) rby[r.date] = r; });
+      lvs.forEach(function (l) {
+        if (l.empId !== e.id || (l.status !== 'approved' && l.status !== 'pending')) return;
+        range(l.start, l.end).forEach(function (d) { if (d.indexOf(m) === 0 && (!lby[d] || l.status === 'approved')) lby[d] = l; });
+      });
+      var t = { workdays: 0, present: 0, lateDays: 0, lateMin: 0, absent: 0, noOut: 0, minutes: 0, leaveDays: 0, leave: {} };
+      Object.keys(LEAVE_TYPES).forEach(function (k) { t.leave[k] = 0; });
+      var list = days.map(function (d) {
+        var work = S.workdays.indexOf(dow(d)) >= 0 && !hm[d];
+        var r = rby[d] || null, l = lby[d] || null, la = l && l.status === 'approved' ? l : null, late = 0, st;
+        if (la && work) { var amt = la.part === 'full' ? 1 : 0.5; t.leave[la.type] = (t.leave[la.type] || 0) + amt; t.leaveDays += amt; }
+        if (work && d <= today) t.workdays++;
+        if (r) {
+          t.present++;
+          late = la && la.part === 'am' ? 0 : num(r.lateMin, 0);
+          if (late > 0) { t.lateDays++; t.lateMin += late; }
+          if (r.out) t.minutes += Math.max(0, toMin(r.out) - toMin(r.in)); else if (d < today) t.noOut++;
+          st = late > 0 ? 'late' : 'ok';
+        } else if (!work) st = hm[d] ? 'holiday' : 'off';
+        else if (la && la.part === 'full') st = 'leave';
+        else if (d > today) st = 'future';
+        else if (d === today) st = 'pending';
+        else { st = 'absent'; t.absent += la ? 0.5 : 1; }
+        return { date: d, dow: dow(d), st: st, work: work, rec: r, leave: l, holiday: hm[d] || '', late: late };
+      });
+      t.hours = Math.round(t.minutes / 6) / 10;
+      return { emp: pubEmp(e), days: list, t: t };
+    });
+  }
+
+  /* =================== router =================== */
+  var PUBLIC = { login: login, register: register };
+  var EMP = { me: me, myMonth: myMonth, punch: punch, photo: photo, changePassword: changePassword, leaveCreate: leaveCreate, leaveCancel: leaveCancel, adjCreate: adjCreate, myRequests: myRequests };
+  var ADMIN = {
+    adminToday: adminToday, adminMonth: adminMonth, requests: requests, decide: decide, employees: employees, saveEmp: saveEmp,
+    importEmps: importEmps, delEmp: delEmp, restoreEmp: restoreEmp, resetLogin: resetLogin, holidays: listHolidays, saveHoliday: saveHoliday,
+    delHoliday: delHoliday, saveSettings: saveSettings, changeAdmin: changeAdmin, qr: qr, editRecord: editRecord, buildMonth: buildMonth,
+    settings: function (c) { return { settings: pubSettings(c.S), adminUser: c.S.adminUser, mustChange: !c.S.adminHash }; }
+  };
+  function run(A, p) {
+    var c = { A: A, p: p, now: A.now() };
+    c.S = settings(A);
+    if (PUBLIC[p.action]) return PUBLIC[p.action](c);
+    var sess = verify(c, p.token);
+    if (!sess) throw E('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่', 'AUTH');
+    c.sess = sess;
+    if (sess.role === 'emp' && EMP[p.action]) return EMP[p.action](c);
+    if (sess.role === 'admin' && ADMIN[p.action]) return ADMIN[p.action](c);
+    throw E('บัญชีนี้ไม่มีสิทธิ์ใช้งานส่วนนี้', 'FORBIDDEN');
+  }
+  function handle(A, p) {
+    p = p || {};
+    try {
+      var data = WRITES[p.action] ? A.lock(function () { return run(A, p); }) : run(A, p);
+      return { ok: true, data: data };
+    } catch (e) {
+      return { ok: false, error: e.message || String(e), code: e.code || '' };
+    }
+  }
+
+  return {
+    handle: handle, monthReport: monthReport, TABLES: TABLES, LEAVE_TYPES: LEAVE_TYPES, PART: PART, STATUS: STATUS,
+    DEFAULTS: DEFAULTS, util: { monthDays: monthDays, dow: dow, addDays: addDays, range: range, toMin: toMin, haversine: haversine, fmtDist: fmtDist, lateOf: lateOf, isDate: isDate, isTime: isTime }
+  };
+})();
+if (typeof module !== 'undefined') module.exports = TC;
