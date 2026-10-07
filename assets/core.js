@@ -5,7 +5,7 @@
  * ===================================================================== */
 var TC = (function () {
   var TABLES = {
-    EMP: { name: 'Employees', cols: ['id', 'code', 'name', 'gender', 'email', 'phone', 'position', 'photo', 'active', 'username', 'passHash', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note', 'shiftStart', 'shiftEnd'] },
+    EMP: { name: 'Employees', cols: ['id', 'code', 'name', 'gender', 'email', 'phone', 'position', 'photo', 'active', 'username', 'passHash', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note', 'shiftStart', 'shiftEnd', 'workdays', 'satStart', 'satEnd'] },
     REC: { name: 'Records', cols: ['date', 'empId', 'code', 'name', 'in', 'out', 'lateMin', 'inDist', 'outDist', 'note', 'updatedAt'] },
     LEAVE: { name: 'Leaves', cols: ['id', 'empId', 'code', 'name', 'type', 'start', 'end', 'part', 'days', 'reason', 'status', 'createdAt', 'decidedAt', 'decidedBy', 'adminNote'] },
     ADJ: { name: 'Adjustments', cols: ['id', 'empId', 'code', 'name', 'date', 'in', 'out', 'reason', 'status', 'createdAt', 'decidedAt', 'decidedBy', 'adminNote'] },
@@ -52,8 +52,35 @@ var TC = (function () {
   }
   function fmtDist(m) { return m >= 1000 ? (m / 1000).toFixed(2) + ' กม.' : Math.round(m) + ' ม.'; }
   function lateOf(t, S) { return t ? Math.max(0, toMin(t) - toMin(S.start) - (S.grace || 0)) : 0; }
-  /** เวลางานรายคน: ว่าง = ใช้เวลางานของบริษัท */
-  function shiftOf(e, S) { return { start: isTime(e && e.shiftStart) ? e.shiftStart : S.start, end: isTime(e && e.shiftEnd) ? e.shiftEnd : S.end, grace: S.grace }; }
+  /** เวลางานรายคน (ว่าง = ใช้ของบริษัท) · วันเสาร์ใช้ satStart/satEnd ถ้าตั้งไว้ */
+  function shiftOf(e, S, date) {
+    var st = isTime(e && e.shiftStart) ? e.shiftStart : S.start, en = isTime(e && e.shiftEnd) ? e.shiftEnd : S.end;
+    if (date && dow(date) === 6) { if (isTime(e && e.satStart)) st = e.satStart; if (isTime(e && e.satEnd)) en = e.satEnd; }
+    return { start: st, end: en, grace: S.grace };
+  }
+  /** วันทำงานรายคน (ว่าง = ใช้ของบริษัท) */
+  function parseDays(v) {
+    var s = str(v); if (!s) return null;
+    var m = s.match(/^([0-6])\s*-\s*([0-6])$/), out = [];
+    if (m) { for (var i = +m[1]; ; i = (i + 1) % 7) { out.push(i); if (i === +m[2] || out.length > 7) break; } }
+    else s.replace(/[0-6]/g, function (d) { if (out.indexOf(+d) < 0) out.push(+d); return d; });
+    return out.length ? out.sort() : null;
+  }
+  function daysOf(e, S) { return parseDays(e && e.workdays) || S.workdays; }
+  var TH_DAY = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
+  function daysText(list) {
+    var order = [1, 2, 3, 4, 5, 6, 0], idx = list.map(function (d) { return order.indexOf(d); }).sort(function (a, b) { return a - b; });
+    var run = idx.every(function (v, i) { return i === 0 || v === idx[i - 1] + 1; });
+    if (run && idx.length > 2) return TH_DAY[order[idx[0]]] + '–' + TH_DAY[order[idx[idx.length - 1]]];
+    return idx.map(function (i) { return TH_DAY[order[i]]; }).join(' ');
+  }
+  function scheduleText(e, S) {
+    var d = daysOf(e, S), sh = shiftOf(e, S), sat = shiftOf(e, S, '2026-10-03');
+    var t = daysText(d) + ' ' + sh.start + '–' + sh.end;
+    if (d.indexOf(6) >= 0 && (sat.start !== sh.start || sat.end !== sh.end)) t += ' · ส. ' + sat.start + '–' + sat.end;
+    return t;
+  }
+  function customSchedule(e) { return !!(str(e.shiftStart) || str(e.shiftEnd) || str(e.workdays) || str(e.satStart) || str(e.satEnd)); }
   function overlaps(a1, a2, b1, b2) { return a1 <= b2 && b1 <= a2; }
 
   /* ---------- settings ---------- */
@@ -70,16 +97,16 @@ var TC = (function () {
   /* ---------- data access ---------- */
   function emps(A) { return A.rows(TABLES.EMP); }
   function isActive(e) { return String(e.active).toUpperCase() !== 'FALSE'; }
-  function pubEmp(e) { return { id: e.id, code: e.code, name: e.name, gender: e.gender, position: e.position, photo: e.photo, email: e.email, phone: e.phone, shiftStart: e.shiftStart || '', shiftEnd: e.shiftEnd || '' }; }
+  function pubEmp(e) { return { id: e.id, code: e.code, name: e.name, gender: e.gender, position: e.position, photo: e.photo, email: e.email, phone: e.phone, shiftStart: e.shiftStart || '', shiftEnd: e.shiftEnd || '', workdays: e.workdays || '', satStart: e.satStart || '', satEnd: e.satEnd || '' }; }
   function recObj(r) { return { date: r.date, empId: r.empId, in: r.in, out: r.out, lateMin: num(r.lateMin, 0), inDist: num(r.inDist, null), outDist: num(r.outDist, null), note: r.note || '' }; }
   function leaveObj(l) { return { id: l.id, empId: l.empId, code: l.code, name: l.name, type: l.type, start: l.start, end: l.end, part: l.part || 'full', days: num(l.days, 0), reason: l.reason, status: l.status, createdAt: l.createdAt, decidedAt: l.decidedAt, adminNote: l.adminNote || '' }; }
   function adjObj(a) { return { id: a.id, empId: a.empId, code: a.code, name: a.name, date: a.date, in: a.in, out: a.out, reason: a.reason, status: a.status, createdAt: a.createdAt, decidedAt: a.decidedAt, adminNote: a.adminNote || '' }; }
   function holidays(A) { return A.rows(TABLES.HOL).filter(function (h) { return isDate(h.date); }).map(function (h) { return { date: h.date, name: h.name }; }); }
   function holMap(A) { var m = {}; holidays(A).forEach(function (h) { m[h.date] = h.name || 'วันหยุด'; }); return m; }
-  function isWork(c, d) { if (!c._hol) c._hol = holMap(c.A); return c.S.workdays.indexOf(dow(d)) >= 0 && !c._hol[d]; }
-  function leaveDays(c, start, end, part) {
-    if (part !== 'full') return isWork(c, start) ? 0.5 : 0;
-    return range(start, end).filter(function (d) { return isWork(c, d); }).length;
+  function isWork(c, e, d) { if (!c._hol) c._hol = holMap(c.A); return daysOf(e, c.S).indexOf(dow(d)) >= 0 && !c._hol[d]; }
+  function leaveDays(c, e, start, end, part) {
+    if (part !== 'full') return isWork(c, e, start) ? 0.5 : 0;
+    return range(start, end).filter(function (d) { return isWork(c, e, d); }).length;
   }
   function quotaOf(e, S, type) { var col = QUOTA[type]; return col ? num(e[col], S[col]) : null; }
   function usage(c, e, year) {
@@ -167,6 +194,7 @@ var TC = (function () {
     var e = myEmp(c);
     return {
       emp: pubEmp(e), username: e.username, settings: pubSettings(c.S), today: c.now.date, now: c.now.time,
+      shiftToday: shiftOf(e, c.S, c.now.date), workToday: isWork(c, e, c.now.date), schedule: scheduleText(e, c.S),
       rec: todayRec(c, e.id), usage: usage(c, e, c.now.date.slice(0, 4)),
       pending: c.A.rows(TABLES.LEAVE).filter(function (l) { return l.empId === e.id && l.status === 'pending'; }).length +
         c.A.rows(TABLES.ADJ).filter(function (a) { return a.empId === e.id && a.status === 'pending'; }).length
@@ -193,7 +221,7 @@ var TC = (function () {
       c.A.update(TABLES.REC, r, { out: time, outDist: String(dist), updatedAt: c.now.iso });
       return { kind: 'out', rec: recObj(merge(r, { out: time, outDist: dist })) };
     }
-    var rec = merge(stamp(e), { date: date, in: time, out: '', lateMin: String(lateOf(time, shiftOf(e, S))), inDist: String(dist), outDist: '', note: '', updatedAt: c.now.iso });
+    var rec = merge(stamp(e), { date: date, in: time, out: '', lateMin: String(lateOf(time, shiftOf(e, S, date))), inDist: String(dist), outDist: '', note: '', updatedAt: c.now.iso });
     c.A.insert(TABLES.REC, rec);
     return { kind: 'in', rec: recObj(rec) };
   }
@@ -222,7 +250,7 @@ var TC = (function () {
     if (reason.length < 2) throw E('กรุณาระบุเหตุผลการลา');
     if (start < addDays(c.now.date, -30)) throw E('ยื่นลาย้อนหลังได้ไม่เกิน 30 วัน');
     if (range(start, end).length > 120) throw E('ช่วงลายาวเกินไป');
-    var days = leaveDays(c, start, end, part);
+    var days = leaveDays(c, e, start, end, part);
     if (!days) throw E('ช่วงวันที่เลือกไม่มีวันทำงาน');
     var clash = c.A.rows(TABLES.LEAVE).filter(function (l) {
       return l.empId === e.id && (l.status === 'pending' || l.status === 'approved') && overlaps(start, end, l.start, l.end) &&
@@ -285,7 +313,8 @@ var TC = (function () {
     var list = emps(c.A).filter(isActive), d = c.now.date;
     var data = monthData(c, d.slice(0, 7), list);
     return {
-      today: d, now: c.now.time, settings: pubSettings(c.S), employees: data.employees,
+      today: d, now: c.now.time, settings: pubSettings(c.S),
+      employees: list.map(function (e) { var o = pubEmp(e); o.workToday = isWork(c, e, d); o.shiftToday = shiftOf(e, c.S, d); return o; }),
       records: data.records.filter(function (r) { return r.date === d; }),
       leaves: data.leaves.filter(function (l) { return l.start <= d && l.end >= d; }),
       holiday: (holMap(c.A))[d] || '',
@@ -322,7 +351,7 @@ var TC = (function () {
   function upsertRecord(c, e, date, tin, tout, note) {
     var r = c.A.rows(TABLES.REC).filter(function (x) { return x.empId === e.id && x.date === date; })[0];
     var patch = { updatedAt: c.now.iso, note: note };
-    if (tin) { patch.in = tin; patch.lateMin = String(lateOf(tin, shiftOf(e, c.S))); }
+    if (tin) { patch.in = tin; patch.lateMin = String(lateOf(tin, shiftOf(e, c.S, date))); }
     if (tout) patch.out = tout;
     if (r) { c.A.update(TABLES.REC, r, patch); return; }
     if (!tin) throw E('วันนี้ยังไม่มีเวลาเข้างาน ต้องระบุเวลาเข้าด้วย');
@@ -351,16 +380,19 @@ var TC = (function () {
       o.active = isActive(e); o.username = e.username || ''; o.hasLogin = !!e.passHash;
       o.qPersonal = e.qPersonal; o.qSick = e.qSick; o.qVacation = e.qVacation; o.qMaternity = e.qMaternity; o.note = e.note || '';
       o.usage = usage(c, e, y);
+      o.schedule = scheduleText(e, c.S); o.custom = customSchedule(e);
       return o;
     });
   }
-  var EMP_FIELDS = ['code', 'name', 'gender', 'email', 'phone', 'position', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note', 'shiftStart', 'shiftEnd'];
+  var EMP_FIELDS = ['code', 'name', 'gender', 'email', 'phone', 'position', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note', 'shiftStart', 'shiftEnd', 'workdays', 'satStart', 'satEnd'];
   function cleanEmp(src) {
     var o = {};
     EMP_FIELDS.forEach(function (k) { if (src[k] !== undefined) o[k] = str(src[k]); });
     if (o.phone !== undefined) o.phone = digits(o.phone);
-    ['shiftStart', 'shiftEnd'].forEach(function (k) { if (o[k] === undefined) return; if (/^\d:\d\d$/.test(o[k])) o[k] = '0' + o[k]; if (o[k] && !isTime(o[k])) throw E('เวลางานต้องอยู่ในรูปแบบ HH:MM เช่น 09:20'); });
+    if (o.workdays !== undefined) { var wd = parseDays(o.workdays); o.workdays = wd ? wd.join(',') : ''; }
+    ['shiftStart', 'shiftEnd', 'satStart', 'satEnd'].forEach(function (k) { if (o[k] === undefined) return; if (/^\d:\d\d$/.test(o[k])) o[k] = '0' + o[k]; if (o[k] && !isTime(o[k])) throw E('เวลางานต้องอยู่ในรูปแบบ HH:MM เช่น 09:20'); });
     if (o.shiftStart && o.shiftEnd && o.shiftEnd <= o.shiftStart) throw E('เวลาเลิกงานต้องหลังเวลาเข้างาน');
+    if (o.satStart && o.satEnd && o.satEnd <= o.satStart) throw E('เวลาเลิกงานวันเสาร์ต้องหลังเวลาเข้างาน');
     return o;
   }
   function saveEmp(c) {
@@ -461,10 +493,11 @@ var TC = (function () {
         if (l.empId !== e.id || (l.status !== 'approved' && l.status !== 'pending')) return;
         range(l.start, l.end).forEach(function (d) { if (d.indexOf(m) === 0 && (!lby[d] || l.status === 'approved')) lby[d] = l; });
       });
+      var wdays = daysOf(e, S);
       var t = { workdays: 0, present: 0, lateDays: 0, lateMin: 0, absent: 0, noOut: 0, minutes: 0, leaveDays: 0, leave: {} };
       Object.keys(LEAVE_TYPES).forEach(function (k) { t.leave[k] = 0; });
       var list = days.map(function (d) {
-        var work = S.workdays.indexOf(dow(d)) >= 0 && !hm[d];
+        var work = wdays.indexOf(dow(d)) >= 0 && !hm[d];
         var r = rby[d] || null, l = lby[d] || null, la = l && l.status === 'approved' ? l : null, late = 0, st;
         if (la && work) { var amt = la.part === 'full' ? 1 : 0.5; t.leave[la.type] = (t.leave[la.type] || 0) + amt; t.leaveDays += amt; }
         if (work && d <= today) t.workdays++;
@@ -518,7 +551,7 @@ var TC = (function () {
 
   return {
     handle: handle, monthReport: monthReport, TABLES: TABLES, LEAVE_TYPES: LEAVE_TYPES, PART: PART, STATUS: STATUS,
-    DEFAULTS: DEFAULTS, util: { monthDays: monthDays, dow: dow, addDays: addDays, range: range, toMin: toMin, haversine: haversine, fmtDist: fmtDist, lateOf: lateOf, shiftOf: shiftOf, isDate: isDate, isTime: isTime }
+    DEFAULTS: DEFAULTS, util: { monthDays: monthDays, dow: dow, addDays: addDays, range: range, toMin: toMin, haversine: haversine, fmtDist: fmtDist, lateOf: lateOf, shiftOf: shiftOf, daysOf: daysOf, parseDays: parseDays, daysText: daysText, scheduleText: scheduleText, customSchedule: customSchedule, isDate: isDate, isTime: isTime }
   };
 })();
 if (typeof module !== 'undefined') module.exports = TC;

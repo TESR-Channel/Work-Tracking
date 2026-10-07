@@ -190,7 +190,7 @@ function writeMonthSheet_(m, rep, S, now) {
 
   const sumH = ['รหัส', 'ชื่อ', 'ตำแหน่ง', 'เวลางาน', 'วันทำงาน', 'มาทำงาน', 'ขาด (วัน)', 'มาสาย (ครั้ง)', 'สายรวม (นาที)']
     .concat(types.map(t => LT[t] + ' (วัน)')).concat(['ลืมเช็คเอาท์', 'ชั่วโมงในออฟฟิศ']);
-  const sum = rep.map(r => [r.emp.code, r.emp.name, r.emp.position, (r.emp.shiftStart || S.start) + '–' + (r.emp.shiftEnd || S.end), r.t.workdays, r.t.present, r.t.absent, r.t.lateDays, r.t.lateMin]
+  const sum = rep.map(r => [r.emp.code, r.emp.name, r.emp.position, TC.util.scheduleText(r.emp, S), r.t.workdays, r.t.present, r.t.absent, r.t.lateDays, r.t.lateMin]
     .concat(types.map(t => r.t.leave[t] || 0)).concat([r.t.noOut, r.t.hours]));
   head_(sh.getRange(4, 1, 1, sumH.length).setValues([sumH]));
   if (sum.length) { sh.getRange(5, 1, sum.length, 1).setNumberFormat('@'); sh.getRange(5, 1, sum.length, sumH.length).setValues(sum); }
