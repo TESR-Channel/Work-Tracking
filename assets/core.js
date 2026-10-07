@@ -5,7 +5,7 @@
  * ===================================================================== */
 var TC = (function () {
   var TABLES = {
-    EMP: { name: 'Employees', cols: ['id', 'code', 'name', 'gender', 'email', 'phone', 'position', 'photo', 'active', 'username', 'passHash', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note', 'shiftStart', 'shiftEnd', 'workdays', 'satStart', 'satEnd'] },
+    EMP: { name: 'Employees', cols: ['id', 'code', 'name', 'gender', 'email', 'phone', 'position', 'photo', 'active', 'username', 'passHash', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note', 'shiftStart', 'shiftEnd', 'workdays', 'satStart', 'satEnd', 'dayTimes'] },
     REC: { name: 'Records', cols: ['date', 'empId', 'code', 'name', 'in', 'out', 'lateMin', 'inDist', 'outDist', 'note', 'updatedAt'] },
     LEAVE: { name: 'Leaves', cols: ['id', 'empId', 'code', 'name', 'type', 'start', 'end', 'part', 'days', 'reason', 'status', 'createdAt', 'decidedAt', 'decidedBy', 'adminNote'] },
     ADJ: { name: 'Adjustments', cols: ['id', 'empId', 'code', 'name', 'date', 'in', 'out', 'reason', 'status', 'createdAt', 'decidedAt', 'decidedBy', 'adminNote'] },
@@ -56,8 +56,22 @@ var TC = (function () {
   function shiftOf(e, S, date) {
     var st = isTime(e && e.shiftStart) ? e.shiftStart : S.start, en = isTime(e && e.shiftEnd) ? e.shiftEnd : S.end;
     if (date && dow(date) === 6) { if (isTime(e && e.satStart)) st = e.satStart; if (isTime(e && e.satEnd)) en = e.satEnd; }
+    if (date) { var dt = parseDayTimes(e && e.dayTimes)[dow(date)]; if (dt) { st = dt.start; en = dt.end; } }
     return { start: st, end: en, grace: S.grace };
   }
+  /** เวลางานเฉพาะบางวัน เช่น "3=09:20-12:20" (วันพุธเลิกเที่ยง) · หลายวันคั่นด้วย ; */
+  function parseDayTimes(v) {
+    var out = {};
+    str(v).split(/[;\n]+/).forEach(function (part) {
+      var m = part.trim().match(/^([0-6])\s*=\s*(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$/);
+      if (!m) return;
+      var a = m[2].length === 4 ? '0' + m[2] : m[2], b = m[3].length === 4 ? '0' + m[3] : m[3];
+      if (isTime(a) && isTime(b) && b > a) out[+m[1]] = { start: a, end: b };
+    });
+    return out;
+  }
+  function dayTimesText(map) { return Object.keys(map).sort().map(function (d) { return d + '=' + map[d].start + '-' + map[d].end; }).join(';'); }
+  var SAMPLE_DAY = ['2026-10-04', '2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09', '2026-10-10'];
   /** วันทำงานรายคน (ว่าง = ใช้ของบริษัท) */
   function parseDays(v) {
     var s = str(v); if (!s) return null;
@@ -75,12 +89,16 @@ var TC = (function () {
     return idx.map(function (i) { return TH_DAY[order[i]]; }).join(' ');
   }
   function scheduleText(e, S) {
-    var d = daysOf(e, S), sh = shiftOf(e, S), sat = shiftOf(e, S, '2026-10-03');
+    var d = daysOf(e, S), sh = shiftOf(e, S);
     var t = daysText(d) + ' ' + sh.start + '–' + sh.end;
-    if (d.indexOf(6) >= 0 && (sat.start !== sh.start || sat.end !== sh.end)) t += ' · ส. ' + sat.start + '–' + sat.end;
+    [1, 2, 3, 4, 5, 6, 0].forEach(function (k) {
+      if (d.indexOf(k) < 0) return;
+      var x = shiftOf(e, S, SAMPLE_DAY[k]);
+      if (x.start !== sh.start || x.end !== sh.end) t += ' · ' + TH_DAY[k] + ' ' + x.start + '–' + x.end;
+    });
     return t;
   }
-  function customSchedule(e) { return !!(str(e.shiftStart) || str(e.shiftEnd) || str(e.workdays) || str(e.satStart) || str(e.satEnd)); }
+  function customSchedule(e) { return !!(str(e.shiftStart) || str(e.shiftEnd) || str(e.workdays) || str(e.satStart) || str(e.satEnd) || str(e.dayTimes)); }
   function overlaps(a1, a2, b1, b2) { return a1 <= b2 && b1 <= a2; }
 
   /* ---------- settings ---------- */
@@ -97,7 +115,7 @@ var TC = (function () {
   /* ---------- data access ---------- */
   function emps(A) { return A.rows(TABLES.EMP); }
   function isActive(e) { return String(e.active).toUpperCase() !== 'FALSE'; }
-  function pubEmp(e) { return { id: e.id, code: e.code, name: e.name, gender: e.gender, position: e.position, photo: e.photo, email: e.email, phone: e.phone, shiftStart: e.shiftStart || '', shiftEnd: e.shiftEnd || '', workdays: e.workdays || '', satStart: e.satStart || '', satEnd: e.satEnd || '' }; }
+  function pubEmp(e) { return { id: e.id, code: e.code, name: e.name, gender: e.gender, position: e.position, photo: e.photo, email: e.email, phone: e.phone, shiftStart: e.shiftStart || '', shiftEnd: e.shiftEnd || '', workdays: e.workdays || '', satStart: e.satStart || '', satEnd: e.satEnd || '', dayTimes: e.dayTimes || '' }; }
   function recObj(r) { return { date: r.date, empId: r.empId, in: r.in, out: r.out, lateMin: num(r.lateMin, 0), inDist: num(r.inDist, null), outDist: num(r.outDist, null), note: r.note || '' }; }
   function leaveObj(l) { return { id: l.id, empId: l.empId, code: l.code, name: l.name, type: l.type, start: l.start, end: l.end, part: l.part || 'full', days: num(l.days, 0), reason: l.reason, status: l.status, createdAt: l.createdAt, decidedAt: l.decidedAt, adminNote: l.adminNote || '' }; }
   function adjObj(a) { return { id: a.id, empId: a.empId, code: a.code, name: a.name, date: a.date, in: a.in, out: a.out, reason: a.reason, status: a.status, createdAt: a.createdAt, decidedAt: a.decidedAt, adminNote: a.adminNote || '' }; }
@@ -372,13 +390,18 @@ var TC = (function () {
       return o;
     });
   }
-  var EMP_FIELDS = ['code', 'name', 'gender', 'email', 'phone', 'position', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note', 'shiftStart', 'shiftEnd', 'workdays', 'satStart', 'satEnd'];
+  var EMP_FIELDS = ['code', 'name', 'gender', 'email', 'phone', 'position', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note', 'shiftStart', 'shiftEnd', 'workdays', 'satStart', 'satEnd', 'dayTimes'];
   function cleanEmp(src) {
     var o = {};
     EMP_FIELDS.forEach(function (k) { if (src[k] !== undefined) o[k] = str(src[k]); });
     if (o.phone !== undefined) o.phone = digits(o.phone);
     if (o.email !== undefined) { o.email = o.email.toLowerCase(); if (o.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(o.email)) throw E('อีเมลไม่ถูกต้อง: ' + o.email); }
     if (o.workdays !== undefined) { var wd = parseDays(o.workdays); o.workdays = wd ? wd.join(',') : ''; }
+    if (o.dayTimes !== undefined) {
+      var raw = o.dayTimes.split(/[;\n]+/).filter(function (x) { return x.trim(); }), parsed = parseDayTimes(o.dayTimes);
+      if (raw.length !== Object.keys(parsed).length) throw E('เวลางานรายวันไม่ถูกต้อง ใช้รูปแบบ 3=09:20-12:20 (0=อาทิตย์ … 6=เสาร์)');
+      o.dayTimes = dayTimesText(parsed);
+    }
     ['shiftStart', 'shiftEnd', 'satStart', 'satEnd'].forEach(function (k) { if (o[k] === undefined) return; if (/^\d:\d\d$/.test(o[k])) o[k] = '0' + o[k]; if (o[k] && !isTime(o[k])) throw E('เวลางานต้องอยู่ในรูปแบบ HH:MM เช่น 09:20'); });
     if (o.shiftStart && o.shiftEnd && o.shiftEnd <= o.shiftStart) throw E('เวลาเลิกงานต้องหลังเวลาเข้างาน');
     if (o.satStart && o.satEnd && o.satEnd <= o.satStart) throw E('เวลาเลิกงานวันเสาร์ต้องหลังเวลาเข้างาน');
@@ -491,27 +514,36 @@ var TC = (function () {
         range(l.start, l.end).forEach(function (d) { if (d.indexOf(m) === 0 && (!lby[d] || l.status === 'approved')) lby[d] = l; });
       });
       var wdays = daysOf(e, S);
-      var t = { workdays: 0, present: 0, lateDays: 0, lateMin: 0, absent: 0, noOut: 0, minutes: 0, leaveDays: 0, leave: {} };
+      var t = { workdays: 0, present: 0, lateDays: 0, lateMin: 0, earlyDays: 0, earlyMin: 0, absent: 0, noOut: 0, minutes: 0, leaveDays: 0, leaveToDate: 0, leave: {} };
       Object.keys(LEAVE_TYPES).forEach(function (k) { t.leave[k] = 0; });
       var list = days.map(function (d) {
         var work = wdays.indexOf(dow(d)) >= 0 && !hm[d];
         var r = rby[d] || null, l = lby[d] || null, la = l && l.status === 'approved' ? l : null, late = 0, st;
-        if (la && work) { var amt = la.part === 'full' ? 1 : 0.5; t.leave[la.type] = (t.leave[la.type] || 0) + amt; t.leaveDays += amt; }
+        var sh = shiftOf(e, S, d), early = 0, flags = [];
+        if (la && work) { var amt = la.part === 'full' ? 1 : 0.5; t.leave[la.type] = (t.leave[la.type] || 0) + amt; t.leaveDays += amt; if (d <= today) t.leaveToDate += amt; }
         if (work && d <= today) t.workdays++;
         if (r) {
           t.present++;
           late = la && la.part === 'am' ? 0 : num(r.lateMin, 0);
-          if (late > 0) { t.lateDays++; t.lateMin += late; }
-          if (r.out) t.minutes += Math.max(0, toMin(r.out) - toMin(r.in)); else if (d < today) t.noOut++;
+          if (late > 0) { t.lateDays++; t.lateMin += late; flags.push('late'); }
+          if (r.out) {
+            t.minutes += Math.max(0, toMin(r.out) - toMin(r.in));
+            early = la && la.part === 'pm' ? 0 : Math.max(0, toMin(sh.end) - toMin(r.out));
+            if (early > 0) { t.earlyDays++; t.earlyMin += early; flags.push('early'); }
+          } else if (d < today) { t.noOut++; flags.push('noOut'); }
           st = late > 0 ? 'late' : 'ok';
         } else if (!work) st = hm[d] ? 'holiday' : 'off';
         else if (la && la.part === 'full') st = 'leave';
         else if (d > today) st = 'future';
         else if (d === today) st = 'pending';
-        else { st = 'absent'; t.absent += la ? 0.5 : 1; }
-        return { date: d, dow: dow(d), st: st, work: work, rec: r, leave: l, holiday: hm[d] || '', late: late };
+        else { st = 'absent'; t.absent += la ? 0.5 : 1; flags.push('absent'); }
+        return { date: d, dow: dow(d), st: st, work: work, rec: r, leave: l, holiday: hm[d] || '', late: late, early: early, shift: work || r ? { start: sh.start, end: sh.end } : null, flags: flags };
       });
       t.hours = Math.round(t.minutes / 6) / 10;
+      var due = t.workdays - t.leaveToDate;
+      t.attendRate = due > 0 ? Math.round(Math.min(1, (due - t.absent) / due) * 100) : null;
+      t.onTimeRate = t.present ? Math.round((t.present - t.lateDays) / t.present * 100) : null;
+      t.alerts = t.lateDays + t.earlyDays + t.noOut + (t.absent > 0 ? Math.ceil(t.absent) : 0);
       return { emp: pubEmp(e), days: list, t: t };
     });
   }
@@ -551,7 +583,7 @@ var TC = (function () {
 
   return {
     handle: handle, monthReport: monthReport, TABLES: TABLES, LEAVE_TYPES: LEAVE_TYPES, PART: PART, STATUS: STATUS,
-    DEFAULTS: DEFAULTS, util: { monthDays: monthDays, dow: dow, addDays: addDays, range: range, toMin: toMin, haversine: haversine, fmtDist: fmtDist, lateOf: lateOf, shiftOf: shiftOf, daysOf: daysOf, parseDays: parseDays, daysText: daysText, scheduleText: scheduleText, customSchedule: customSchedule, isDate: isDate, isTime: isTime }
+    DEFAULTS: DEFAULTS, util: { monthDays: monthDays, dow: dow, addDays: addDays, range: range, toMin: toMin, haversine: haversine, fmtDist: fmtDist, lateOf: lateOf, shiftOf: shiftOf, daysOf: daysOf, parseDays: parseDays, daysText: daysText, scheduleText: scheduleText, parseDayTimes: parseDayTimes, dayTimesText: dayTimesText, customSchedule: customSchedule, isDate: isDate, isTime: isTime }
   };
 })();
 if (typeof module !== 'undefined') module.exports = TC;
