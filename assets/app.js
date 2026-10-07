@@ -12,7 +12,7 @@ var APP = (function () {
   var TH_MF = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
   var TH_D = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
   var TH_DF = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
-  var ST = { ok: ['ok', 'มา'], late: ['late', 'สาย'], absent: ['absent', 'ขาด'], leave: ['leave', 'ลา'], pending: ['idle', 'ยังไม่เข้างาน'], holiday: ['holiday', 'วันหยุด'], off: ['off', 'วันหยุด'], future: ['future', '—'] };
+  var ST = { ok: ['ok', 'มา'], late: ['late', 'สาย'], absent: ['absent', 'ขาด'], leave: ['leave', 'ลา'], pending: ['idle', 'ยังไม่เข้างาน'], holiday: ['holiday', 'วันหยุด'], off: ['off', 'วันหยุด'], future: ['future', '—'], pre: ['off', 'ยังไม่เริ่มใช้ระบบ'] };
   var REQ = { pending: ['pending-req', 'รออนุมัติ'], approved: ['approved', 'อนุมัติแล้ว'], rejected: ['rejected', 'ไม่อนุมัติ'], cancelled: ['cancelled', 'ยกเลิกแล้ว'] };
 
   function pad(n) { return (n < 10 ? '0' : '') + n; }
@@ -51,23 +51,59 @@ var APP = (function () {
   }
 
   /** api(action, params) — ส่งคำสั่งไป Apps Script (หรือโหมดทดลอง) พร้อม token ของหน้านั้น */
+  /* ---------- API ---------- *
+   * ความเร็ว: Google Apps Script ตอบช้า (1–5 วินาที) จึง
+   *  1) ปลุกเซิร์ฟเวอร์ทันทีที่เปิดหน้า (warm-up)
+   *  2) คำสั่งอ่านข้อมูล: แสดงข้อมูลล่าสุดที่เคยโหลดทันที แล้วโหลดของใหม่เบื้องหลัง (ถ้าเปลี่ยนจะวาดหน้าใหม่ให้เอง)
+   *  3) หมดเวลา 30 วินาที และลองใหม่อัตโนมัติ 1 ครั้งสำหรับคำสั่งอ่าน
+   *  4) คำสั่งที่เขียนข้อมูลจะล้างแคชทั้งหมด เพื่อให้หน้าถัดไปเห็นข้อมูลใหม่ */
+  var CK = 'tesr-c:', FRESH_MS = 15000, MAX_AGE = 7 * 24 * 3600 * 1000, NOCACHE = { selfie: 1, qr: 1 };
+  var listeners = [];
+  function onFresh(fn) { listeners.push(fn); }
+  /** วาดหน้าใหม่ได้ไหม: ไม่มีหน้าต่าง popup เปิดอยู่ และผู้ใช้ไม่ได้กำลังพิมพ์ */
+  function idle() { var m = document.getElementById('modal'), a = document.activeElement; return !(m && !m.hidden) && !(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)); }
+  function cacheClear() { try { Object.keys(localStorage).forEach(function (k) { if (k.indexOf(CK) === 0) localStorage.removeItem(k); }); } catch (e) {} }
+  function cacheGet(k) { try { var v = JSON.parse(localStorage.getItem(CK + k) || 'null'); return v && Date.now() - v.t < MAX_AGE ? v : null; } catch (e) { return null; } }
+  function cachePut(k, data) { try { var s = JSON.stringify({ t: Date.now(), d: data }); if (s.length < 400000) localStorage.setItem(CK + k, s); } catch (e) { cacheClear(); } }
+  function post(body, retry) {
+    var ctl = window.AbortController ? new AbortController() : null, timer = ctl ? setTimeout(function () { ctl.abort(); }, 30000) : null;
+    return fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body), signal: ctl ? ctl.signal : undefined })
+      .then(function (r) { return r.text(); })
+      .then(function (t) { clearTimeout(timer); try { return JSON.parse(t); } catch (e) { var x = new Error('เซิร์ฟเวอร์ตอบกลับไม่ถูกต้อง'); x.bad = 1; throw x; } },
+        function (e) { clearTimeout(timer); var x = new Error(e && e.name === 'AbortError' ? 'เซิร์ฟเวอร์ตอบช้าเกินไป ลองใหม่อีกครั้ง' : 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบอินเทอร์เน็ตแล้วลองใหม่'); x.net = 1; throw x; })
+      .catch(function (e) { if (retry > 0) return new Promise(function (ok) { setTimeout(ok, 700); }).then(function () { return post(body, retry - 1); }); throw e; });
+  }
+  function warmUp() { if (REMOTE) try { fetch(API_URL, { method: 'GET', mode: 'no-cors' }).catch(function () {}); } catch (e) {} }
   function makeApi(tokenKey, onAuthFail) {
+    var unwrap = function (j) {
+      if (!j.ok) { if (j.code === 'AUTH' && onAuthFail) { cacheClear(); onAuthFail(); } var e = new Error(j.error || 'เกิดข้อผิดพลาด'); e.code = j.code; throw e; }
+      return j.data;
+    };
+    var raw = function (body, write) {
+      if (!REMOTE) return new Promise(function (res) { setTimeout(function () { res(JSON.parse(JSON.stringify(TC.handle(TCMock.adapter, body)))); }, 120); });
+      return post(body, write ? 0 : 1);
+    };
     return function (action, params) {
-      var body = Object.assign({ action: action, token: store.get(tokenKey) || '' }, params || {});
-      var p;
-      if (REMOTE) {
-        p = fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) })
-          .then(function (r) { return r.json(); }, function () { throw new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบอินเทอร์เน็ตแล้วลองใหม่'); })
-          .catch(function (e) { if (e && e.message && /เชื่อมต่อ/.test(e.message)) throw e; throw new Error('เซิร์ฟเวอร์ตอบกลับไม่ถูกต้อง'); });
-      } else {
-        p = new Promise(function (res) { setTimeout(function () { res(JSON.parse(JSON.stringify(TC.handle(TCMock.adapter, body)))); }, 120); });
-      }
-      return p.then(function (j) {
-        if (!j.ok) { if (j.code === 'AUTH' && onAuthFail) onAuthFail(); var e = new Error(j.error || 'เกิดข้อผิดพลาด'); e.code = j.code; throw e; }
-        return j.data;
-      });
+      var token = store.get(tokenKey) || '', body = Object.assign({ action: action, token: token }, params || {});
+      var write = !!(TC.WRITES && TC.WRITES[action]);
+      if (write) return raw(body, action !== 'login').then(function (j) { cacheClear(); return unwrap(j); }); // login ลองใหม่ได้ · ลงเวลา/บันทึก ไม่ลองซ้ำเอง กันบันทึกซ้ำ
+      if (NOCACHE[action] || !token) return raw(body, false).then(unwrap);
+      var key = tokenKey + '|' + token.slice(-12) + '|' + action + '|' + JSON.stringify(params || {}), hit = cacheGet(key);
+      var fetchFresh = function () {
+        return raw(body, false).then(function (j) {
+          var d = unwrap(j), before = hit && JSON.stringify(hit.d);
+          cachePut(key, d);
+          if (hit && JSON.stringify(d) !== before) listeners.forEach(function (fn) { try { fn(action, d, params); } catch (e) {} });
+          return d;
+        });
+      };
+      if (hit && hit.d && hit.d.today && hit.d.today !== ymd(new Date())) hit = null; // ข้อมูลของเมื่อวาน ไม่ใช้
+      if (!hit) return fetchFresh();
+      if (Date.now() - hit.t > FRESH_MS) fetchFresh().catch(function () {});
+      return Promise.resolve(hit.d);
     };
   }
+  warmUp();
 
   /** ปฏิทินรายเดือน (อาทิตย์เป็นวันแรก) — cell(dateStr) คืน {cls, html} */
   function calendar(m, cell) {
@@ -162,6 +198,35 @@ var APP = (function () {
     };
   })();
 
+  /* ---------- ตัวเลือกเดือน/ปี: ลูกศร + เลือกเดือน + เลือกปี + ปุ่มเดือนนี้ ---------- */
+  function yearsAround(y) { var now = new Date().getFullYear(), a = Math.min(2025, y, now - 1), b = Math.max(now + 1, y), o = []; for (var i = a; i <= b; i++) o.push(i); return o; }
+  function monthPicker(id, ym) {
+    var y = +ym.slice(0, 4), m = +ym.slice(5, 7), cur = ymd(new Date()).slice(0, 7);
+    return '<div class="mpick" id="' + id + '"><button type="button" class="icon-btn" data-step="-1" aria-label="เดือนก่อน">‹</button>' +
+      '<select data-part="m" aria-label="เดือน">' + TH_MF.map(function (n, i) { return '<option value="' + (i + 1) + '"' + (i + 1 === m ? ' selected' : '') + '>' + n + '</option>'; }).join('') + '</select>' +
+      '<select data-part="y" aria-label="ปี">' + yearsAround(y).map(function (v) { return '<option value="' + v + '"' + (v === y ? ' selected' : '') + '>' + (v + 543) + '</option>'; }).join('') + '</select>' +
+      '<button type="button" class="icon-btn" data-step="1" aria-label="เดือนถัดไป">›</button>' +
+      (ym !== cur ? '<button type="button" class="btn ghost sm" data-now>เดือนนี้</button>' : '') + '</div>';
+  }
+  function bindMonthPicker(id, ym, cb) {
+    var el = document.getElementById(id); if (!el) return;
+    var ms = el.querySelector('[data-part=m]'), ys = el.querySelector('[data-part=y]');
+    var pick = function () { cb(ys.value + '-' + pad(+ms.value)); };
+    ms.onchange = pick; ys.onchange = pick;
+    el.querySelectorAll('[data-step]').forEach(function (b) { b.onclick = function () { cb(addMonth(ym, +b.dataset.step)); }; });
+    var nb = el.querySelector('[data-now]'); if (nb) nb.onclick = function () { cb(ymd(new Date()).slice(0, 7)); };
+  }
+  function yearPicker(id, y) {
+    return '<div class="mpick" id="' + id + '"><button type="button" class="icon-btn" data-step="-1" aria-label="ปีก่อน">‹</button><select data-part="y" aria-label="ปี">' +
+      yearsAround(y).map(function (v) { return '<option value="' + v + '"' + (v === y ? ' selected' : '') + '>ปี ' + (v + 543) + '</option>'; }).join('') +
+      '</select><button type="button" class="icon-btn" data-step="1" aria-label="ปีถัดไป">›</button></div>';
+  }
+  function bindYearPicker(id, y, cb) {
+    var el = document.getElementById(id); if (!el) return;
+    el.querySelector('[data-part=y]').onchange = function () { cb(+this.value); };
+    el.querySelectorAll('[data-step]').forEach(function (b) { b.onclick = function () { cb(y + +b.dataset.step); }; });
+  }
+
   var ICON = {
     home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>',
     cal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
@@ -180,6 +245,7 @@ var APP = (function () {
     pad: pad, ymd: ymd, hm: hm, esc: esc, thDate: thDate, thRange: thRange, thMonth: thMonth, addMonth: addMonth,
     fmtLate: fmtLate, fmtDays: fmtDays, avatar: avatar, person: person, pill: pill, stPill: stPill, reqPill: reqPill, leaveLabel: leaveLabel,
     store: store, toast: toast, makeApi: makeApi, calendar: calendar, readPhoto: readPhoto, modal: modal, closeModal: closeModal,
-    csv: csv, parseCsv: parseCsv, download: download, sound: sound
+    csv: csv, parseCsv: parseCsv, download: download, sound: sound, onFresh: onFresh, cacheClear: cacheClear, idle: idle,
+    monthPicker: monthPicker, bindMonthPicker: bindMonthPicker, yearPicker: yearPicker, bindYearPicker: bindYearPicker
   };
 })();
