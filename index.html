@@ -4,589 +4,375 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0d0b0a">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>TESR Time Clock</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
-<style>
-/* Layout: brand strip on top with a mode switch; employee side is a phone-width column, admin side is a tabbed console. TESR CI: black / crimson / gold */
-:root{
-  --bg:#f6f4f1; --surface:#ffffff; --surface-2:#efebe6; --line:#ddd6cf;
-  --fg:#17130f; --muted:#6b625a;
-  --crimson:#8B0000; --crimson-soft:#f5e3e1; --gold:#C9A84C; --gold-ink:#7a6220;
-  --ok:#1f7a4a; --ok-soft:#dff1e7; --warn:#a2560b; --warn-soft:#fbead6; --bad:#b3261e; --bad-soft:#fbe1df;
-  --ink:#0d0b0a; --on-ink:#f3eee6;
-  --f-display:"Chakra Petch","IBM Plex Sans Thai",system-ui,sans-serif;
-  --f-body:"IBM Plex Sans Thai",system-ui,sans-serif;
-  --f-mono:"IBM Plex Mono",ui-monospace,monospace;
-}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
-  --bg:#0f0d0c; --surface:#1a1716; --surface-2:#24201e; --line:#3a3330;
-  --fg:#f1ebe4; --muted:#a69c93; --crimson:#d2453c; --crimson-soft:#3a1715; --gold:#d8b964; --gold-ink:#e6cc85;
-  --ok:#5fcf93; --ok-soft:#173326; --warn:#f0a65a; --warn-soft:#3a2714; --bad:#ff7b72; --bad-soft:#3d1a18;
-  --ink:#000; --on-ink:#f3eee6; color-scheme:dark}}
-:root[data-theme="dark"]{
-  --bg:#0f0d0c; --surface:#1a1716; --surface-2:#24201e; --line:#3a3330;
-  --fg:#f1ebe4; --muted:#a69c93; --crimson:#d2453c; --crimson-soft:#3a1715; --gold:#d8b964; --gold-ink:#e6cc85;
-  --ok:#5fcf93; --ok-soft:#173326; --warn:#f0a65a; --warn-soft:#3a2714; --bad:#ff7b72; --bad-soft:#3d1a18;
-  --ink:#000; --on-ink:#f3eee6; color-scheme:dark}
-*{box-sizing:border-box}
-body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:15px;line-height:1.55}
-h1,h2,h3{font-family:var(--f-display);margin:0;text-wrap:balance;line-height:1.2}
-.num{font-variant-numeric:tabular-nums}
-button,input,select{font:inherit;color:inherit}
-button{cursor:pointer}
-:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
-
-.topbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--ink);color:var(--on-ink);border-bottom:3px solid var(--crimson)}
-.topbar-in{max-width:1080px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.brand{display:flex;align-items:center;gap:10px;margin-right:auto}
-.mark{width:34px;height:34px;border:2px solid var(--gold);display:grid;place-items:center;font-family:var(--f-display);font-weight:700;color:var(--gold);font-size:13px;letter-spacing:.04em}
-.brand b{font-family:var(--f-display);font-size:17px;letter-spacing:.02em}
-.brand small{display:block;color:#b8ad9f;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase}
-.seg{display:flex;background:#221c19;border:1px solid #3d3330;border-radius:999px;padding:3px}
-.seg button{border:0;background:none;color:#cfc4b6;padding:6px 14px;border-radius:999px;font-size:13.5px;font-weight:600}
-.seg button[aria-pressed="true"]{background:var(--gold);color:#17130f}
-
-.wrap{max-width:1080px;margin:0 auto;padding-inline:16px;padding-block:20px 48px}
-.demo-note{font-size:12.5px;color:var(--muted);background:var(--surface-2);border:1px dashed var(--line);padding:8px 12px;border-radius:8px;margin-bottom:16px}
-
-/* ---------- employee ---------- */
-.phone{max-width:430px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
-.who{display:flex;align-items:center;gap:12px}
-.who select{flex:1;min-width:0;padding:8px 10px;border:1px solid var(--line);background:var(--surface);border-radius:8px}
-.hero{background:var(--ink);color:var(--on-ink);border-radius:16px;padding:18px;display:flex;flex-direction:column;gap:14px;position:relative;overflow:hidden}
-.hero::after{content:"";position:absolute;inset:auto -40px -60px auto;width:180px;height:180px;border:1px solid rgba(201,168,76,.25);border-radius:50%}
-.hero-top{display:flex;gap:14px;align-items:center}
-.avatar{width:58px;height:58px;border-radius:50%;object-fit:cover;background:var(--crimson);color:#fff;display:grid;place-items:center;font-family:var(--f-display);font-weight:700;font-size:20px;flex:none;border:2px solid var(--gold);overflow:hidden}
-.avatar img{width:100%;height:100%;object-fit:cover}
-.avatar.sm{width:36px;height:36px;font-size:13px;border-width:1.5px}
-.hero h2{font-size:20px}
-.hero .role{color:#b8ad9f;font-size:13px}
-.clock{font-family:var(--f-display);font-size:44px;font-weight:600;letter-spacing:.02em;line-height:1}
-.clock-date{color:#cfc4b6;font-size:13px}
-.shift{font-size:12.5px;color:#b8ad9f;font-family:var(--f-mono)}
-.punch{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.punch .cell{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px}
-.punch .lbl{font-size:12px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
-.punch .t{font-family:var(--f-display);font-size:26px;font-weight:600}
-.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:2px 9px;border-radius:999px;white-space:nowrap}
-.pill.ok{background:var(--ok-soft);color:var(--ok)}
-.pill.late{background:var(--warn-soft);color:var(--warn)}
-.pill.bad{background:var(--bad-soft);color:var(--bad)}
-.pill.idle{background:var(--surface-2);color:var(--muted)}
-.btn{border:0;border-radius:12px;padding:14px 16px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:8px}
-.btn.primary{background:var(--crimson);color:#fff}
-.btn.gold{background:var(--gold);color:#17130f}
-.btn.ghost{background:var(--surface);border:1px solid var(--line)}
-.btn.sm{padding:8px 12px;border-radius:8px;font-size:13.5px}
-.btn:disabled{opacity:.45;cursor:not-allowed}
-.btn-scan{width:100%;font-size:17px;padding:18px}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:12px}
-.sec-h{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:8px}
-.sec-h h3{font-size:16px}
-.sec-h span{font-size:12.5px;color:var(--muted)}
-.hist{list-style:none;margin:0;padding:0}
-.hist li{display:grid;grid-template-columns:76px 1fr auto;gap:10px;align-items:center;padding:10px 14px;border-top:1px solid var(--line)}
-.hist li:first-child{border-top:0}
-.hist .d{font-family:var(--f-display);font-weight:600;font-size:14px}
-.hist .d small{display:block;font-family:var(--f-body);font-weight:400;color:var(--muted);font-size:11.5px}
-.hist .tt{font-family:var(--f-mono);font-size:13px;color:var(--muted)}
-.sum-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden}
-.sum-strip div{background:var(--surface);padding:10px 12px}
-.sum-strip b{display:block;font-family:var(--f-display);font-size:22px}
-.sum-strip span{font-size:12px;color:var(--muted)}
-
-/* scanner modal */
-.modal{position:fixed;inset:0;z-index:50;background:rgba(10,8,7,.72);display:grid;place-items:center;padding:16px}
-.sheet{width:100%;max-width:430px;background:var(--surface);border-radius:16px;overflow:hidden;max-height:92vh;overflow-y:auto}
-.viewfinder{background:#050404;aspect-ratio:1/1;max-width:100%;position:relative;display:grid;place-items:center}
-.viewfinder .frame{width:62%;aspect-ratio:1/1;position:relative}
-.viewfinder .frame i{position:absolute;width:28px;height:28px;border-color:var(--gold);border-style:solid}
-.viewfinder .frame i:nth-child(1){top:0;left:0;border-width:3px 0 0 3px}
-.viewfinder .frame i:nth-child(2){top:0;right:0;border-width:3px 3px 0 0}
-.viewfinder .frame i:nth-child(3){bottom:0;left:0;border-width:0 0 3px 3px}
-.viewfinder .frame i:nth-child(4){bottom:0;right:0;border-width:0 3px 3px 0}
-.viewfinder .laser{position:absolute;left:6%;right:6%;height:2px;background:#e04a3f;box-shadow:0 0 12px #e04a3f;top:10%;animation:scan 2.2s ease-in-out infinite alternate}
-@keyframes scan{to{top:88%}}
-@media (prefers-reduced-motion:reduce){.viewfinder .laser{animation:none;top:50%}}
-.viewfinder .vf-cap{position:absolute;bottom:12px;left:0;right:0;text-align:center;color:#d8cfc4;font-size:13px}
-.sheet-body{padding:16px;display:flex;flex-direction:column;gap:12px}
-.geo{display:flex;gap:12px;align-items:center;padding:12px;border-radius:10px;border:1px solid var(--line)}
-.geo.in{background:var(--ok-soft);border-color:transparent}
-.geo.out{background:var(--bad-soft);border-color:transparent}
-.geo b{font-family:var(--f-display)}
-.geo .dot{width:12px;height:12px;border-radius:50%;flex:none;background:var(--muted)}
-.geo.in .dot{background:var(--ok)} .geo.out .dot{background:var(--bad)}
-.field{display:flex;flex-direction:column;gap:4px}
-.field label{font-size:12.5px;color:var(--muted)}
-.field input,.field select{padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);min-width:0}
-.row{display:flex;gap:10px;flex-wrap:wrap}
-.row>*{flex:1 1 140px;min-width:0}
-.result{padding:16px;border-radius:12px;text-align:center}
-.result h3{font-size:22px}
-.result.ok{background:var(--ok-soft);color:var(--ok)}
-.result.bad{background:var(--bad-soft);color:var(--bad)}
-.result.late{background:var(--warn-soft);color:var(--warn)}
-
-/* ---------- admin ---------- */
-.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:18px;overflow-x:auto}
-.tabs button{border:0;background:none;padding:10px 14px;font-weight:600;color:var(--muted);border-bottom:3px solid transparent;margin-bottom:-1px;white-space:nowrap;font-family:var(--f-display);font-size:15px}
-.tabs button[aria-selected="true"]{color:var(--fg);border-color:var(--crimson)}
-.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
-.kpi{padding:14px}
-.kpi span{font-size:12.5px;color:var(--muted)}
-.kpi b{display:block;font-family:var(--f-display);font-size:30px;line-height:1.1}
-.kpi.k-late b{color:var(--warn)} .kpi.k-abs b{color:var(--bad)} .kpi.k-in b{color:var(--ok)}
-@media (max-width:640px){.kpis{grid-template-columns:repeat(2,1fr)}}
-.tbl-wrap{overflow-x:auto}
-table{width:100%;border-collapse:collapse;font-size:14px}
-th{text-align:left;font-weight:600;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
-td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
-tr:last-child td{border-bottom:0}
-td.r,th.r{text-align:right}
-.person{display:flex;align-items:center;gap:10px;min-width:160px}
-.person small{display:block;color:var(--muted);font-size:12px}
-.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-bottom:14px}
-.toolbar .field{flex:0 1 200px}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-@media (max-width:760px){.grid2{grid-template-columns:1fr}}
-.panel{padding:16px;display:flex;flex-direction:column;gap:12px}
-.panel h3{font-size:17px}
-.qrbox{display:grid;place-items:center;background:#fff;padding:18px;border-radius:12px;border:1px solid var(--line)}
-.qrbox canvas,.qrbox img{max-width:100%;height:auto}
-.qrmeta{font-family:var(--f-mono);font-size:12.5px;color:var(--muted);word-break:break-all;text-align:center}
-.bar{height:6px;background:var(--surface-2);border-radius:3px;overflow:hidden;min-width:60px}
-.bar i{display:block;height:100%;background:var(--warn)}
-textarea{width:100%;min-height:140px;font-family:var(--f-mono);font-size:12px;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);color:var(--fg)}
-.confirm{display:flex;gap:6px;align-items:center;font-size:13px}
-.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--on-ink);padding:10px 16px;border-radius:10px;font-size:14px;z-index:60;border-left:3px solid var(--gold);max-width:calc(100% - 32px)}
-.empty{padding:20px;text-align:center;color:var(--muted)}
-</style>
-
-<style>[hidden]{display:none!important}body{margin:0}:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}</style>
+<link rel="stylesheet" href="assets/styles.css">
 </head>
 <body>
-<style>
-.viewfinder video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
-.viewfinder .frame{z-index:1}
-.steps{display:flex;flex-direction:column;gap:8px}
-.step{display:flex;gap:12px;align-items:center;padding:12px;border-radius:10px;border:1px solid var(--line)}
-.step .dot{width:12px;height:12px;border-radius:50%;flex:none;background:var(--muted)}
-.step.ok{background:var(--ok-soft);border-color:transparent}.step.ok .dot{background:var(--ok)}
-.step.bad{background:var(--bad-soft);border-color:transparent}.step.bad .dot{background:var(--bad)}
-.step b{font-family:var(--f-display)}
-.step small{color:var(--muted)}
-.mode-badge{font-size:11px;letter-spacing:.08em;text-transform:uppercase;padding:2px 8px;border-radius:999px;border:1px solid #5a4b45;color:#d8cfc4}
-.mode-badge.live{border-color:var(--gold);color:var(--gold)}
-.login{max-width:360px;margin:40px auto;padding:20px;display:flex;flex-direction:column;gap:12px}
-.days{display:flex;gap:6px;flex-wrap:wrap}
-.days label{display:flex;align-items:center;gap:4px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-size:13.5px;cursor:pointer}
-.days input{accent-color:var(--crimson)}
-tr.clickable{cursor:pointer}
-tr.clickable:hover td{background:var(--surface-2)}
-tr.sel td{background:var(--crimson-soft)}
-.detail-h{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:18px 0 10px}
-.loading{padding:40px;text-align:center;color:var(--muted)}
-.err{padding:12px 14px;border-radius:10px;background:var(--bad-soft);color:var(--bad)}
-.link{color:var(--crimson);font-weight:600}
-</style>
+<div id="app"><div class="loading">กำลังโหลด…</div></div>
+<div id="toast" class="toast" role="status" hidden></div>
 
-<header class="topbar">
-  <div class="topbar-in">
-    <div class="brand"><div class="mark">TESR</div><div><b>Time Clock</b><small>ลงเวลาเข้า–ออกงาน</small></div></div>
-    <span class="mode-badge" id="modeBadge">Demo</span>
-    <div class="seg" role="group" aria-label="โหมด">
-      <button id="m-emp" aria-pressed="true">พนักงาน</button>
-      <button id="m-adm" aria-pressed="false">แอดมิน</button>
-    </div>
-  </div>
-</header>
-
-<main class="wrap">
-  <p class="demo-note" id="demoNote" hidden>โหมดทดลอง · ข้อมูลเป็นตัวอย่างและเก็บในเบราว์เซอร์นี้เท่านั้น · ใส่ URL ของ Apps Script ใน <code>API_URL</code> เพื่อบันทึกลง Google Sheet จริง · <button class="btn ghost sm" id="reset" style="padding:2px 8px">รีเซ็ตข้อมูลตัวอย่าง</button></p>
-  <section id="view-emp"><div class="loading">กำลังโหลด…</div></section>
-  <section id="view-adm" hidden></section>
-</main>
-
-<div class="modal" id="modal" hidden></div>
-<div class="toast" id="toast" hidden></div>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="assets/config.js"></script>
+<script src="assets/core.js"></script>
+<script src="assets/mock.js"></script>
+<script src="assets/app.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <script>
-/* ================= CONFIG =================
-   วาง URL ของ Apps Script Web App (ลงท้ายด้วย /exec) ไว้ตรงนี้
-   ปล่อยว่าง = โหมดทดลอง ใช้ข้อมูลตัวอย่างในเบราว์เซอร์ */
-const API_URL = '';
-/* ========================================== */
+(function () {
+var A = APP, esc = A.esc, TOKEN = 'tesr-tc-emp';
+var api = A.makeApi(TOKEN, function () { logout('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่'); });
+var root = document.getElementById('app');
+var ME = null, view = 'home', MONTHS = {}, calMonth = null, selDay = null, REQS = null;
+var urlToken = '';
+try { var q = new URLSearchParams(location.search); urlToken = q.get('t') || ''; if (urlToken) history.replaceState(null, '', location.pathname); } catch (e) {}
 
-(function(){
-const REMOTE=!!API_URL;
-const pad=n=>String(n).padStart(2,'0');
-const ymd=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
-const hm=d=>pad(d.getHours())+':'+pad(d.getMinutes());
-const toMin=s=>{if(!s)return null;const[a,b]=s.split(':').map(Number);return a*60+b};
-const TH_M=['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
-const TH_MF=['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
-const TH_D=['อา.','จ.','อ.','พ.','พฤ.','ศ.','ส.'];
-const TH_DF=['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'];
-const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const uid=()=>'e'+Math.random().toString(36).slice(2,10);
-const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
-const sess={get(k){try{return sessionStorage.getItem(k)}catch(e){return null}},set(k,v){try{sessionStorage.setItem(k,v)}catch(e){}}};
-function haversine(a,b,c,d){const R=6371000,t=x=>x*Math.PI/180;const dl=t(c-a),dg=t(d-b);const h=Math.sin(dl/2)**2+Math.cos(t(a))*Math.cos(t(c))*Math.sin(dg/2)**2;return 2*R*Math.asin(Math.sqrt(h))}
-const fmtDist=m=>m>=1000?(m/1000).toFixed(2)+' กม.':Math.round(m)+' ม.';
-const fmtLate=m=>{if(!m)return '0 นาที';const h=Math.floor(m/60);return h?`${h} ชม. ${m%60} นาที`:`${m} นาที`};
-const thDate=s=>{const d=new Date(s+'T00:00');return `${TH_D[d.getDay()]} ${d.getDate()} ${TH_M[d.getMonth()]}`};
-const lateOf=(t,s)=>t?Math.max(0,toMin(t)-toMin(s.start)-(+s.grace||0)):0;
-function toast(t){const el=document.getElementById('toast');el.textContent=t;el.hidden=false;clearTimeout(toast._t);toast._t=setTimeout(()=>el.hidden=true,2800)}
-function parseToken(txt){txt=String(txt||'').trim();try{const u=new URL(txt);const t=u.searchParams.get('t');if(t)return t}catch(e){}const p=txt.split('|');return p.length>=3?p[2]:txt}
-
-/* ================= DATA LAYER =================
-   Remote = Apps Script + Google Sheet · Local = ข้อมูลตัวอย่างในเบราว์เซอร์ (logic เดียวกับฝั่ง server) */
-let PIN=sess.get('tesr-tc-pin')||'';
-async function call(action,params){
-  let r;
-  try{r=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({action},params||{}))})}
-  catch(e){throw new Error('เชื่อมต่อ Google Sheet ไม่ได้ ตรวจสอบอินเทอร์เน็ตหรือ URL ของ Apps Script')}
-  const j=await r.json().catch(()=>({ok:false,error:'Apps Script ตอบกลับไม่ถูกต้อง (ตรวจสิทธิ์ Deploy เป็น Anyone)'}));
-  if(!j.ok)throw new Error(j.error||'เกิดข้อผิดพลาด');return j.data;
+/* ================= login / register ================= */
+function showLogin(msg, tab) {
+  tab = tab || 'login';
+  root.innerHTML = '<div class="login-wrap"><div class="login-card">' +
+    '<div class="login-brand"><div class="mark">TESR</div><div><b>Time Clock</b><small>ลงเวลาเข้า–ออกงาน · สำหรับพนักงาน</small></div></div>' +
+    '<div class="seg" role="group"><button data-tab="login" aria-pressed="' + (tab === 'login') + '">เข้าสู่ระบบ</button><button data-tab="reg" aria-pressed="' + (tab === 'reg') + '">ลงทะเบียนครั้งแรก</button></div>' +
+    (tab === 'login'
+      ? '<form id="lf" class="stack"><div class="field"><label for="u">ชื่อผู้ใช้</label><input id="u" autocomplete="username" autocapitalize="none" required></div>' +
+        '<div class="field"><label for="p">รหัสผ่าน</label><input id="p" type="password" autocomplete="current-password" required></div>' +
+        '<div id="lerr"></div><button class="btn primary block" type="submit">เข้าสู่ระบบ</button>' +
+        '<p class="small muted">ลืมรหัสผ่าน แจ้งแอดมินให้รีเซ็ต แล้วลงทะเบียนใหม่ได้ทันที</p></form>'
+      : '<form id="rf" class="stack"><p class="small muted">ยืนยันตัวตนด้วยรหัสพนักงานและเบอร์โทรที่ให้ไว้กับบริษัท แล้วตั้งชื่อผู้ใช้และรหัสผ่านของคุณเอง</p>' +
+        '<div class="row"><div class="field"><label for="rc">รหัสพนักงาน</label><input id="rc" required autocapitalize="characters"></div>' +
+        '<div class="field"><label for="rp">เบอร์โทร</label><input id="rp" type="tel" inputmode="tel" required></div></div>' +
+        '<div class="field"><label for="ru">ตั้งชื่อผู้ใช้ (a-z, 0-9)</label><input id="ru" autocomplete="username" autocapitalize="none" required minlength="3"></div>' +
+        '<div class="row"><div class="field"><label for="rw">ตั้งรหัสผ่าน</label><input id="rw" type="password" autocomplete="new-password" required minlength="6"></div>' +
+        '<div class="field"><label for="rw2">ยืนยันรหัสผ่าน</label><input id="rw2" type="password" autocomplete="new-password" required minlength="6"></div></div>' +
+        '<div id="lerr"></div><button class="btn primary block" type="submit">ลงทะเบียนและเข้าสู่ระบบ</button></form>') +
+    (A.REMOTE ? '' : '<div class="demo-hint">โหมดทดลอง · เข้าด้วย <code>demo</code> / <code>demo1234</code><br>ลองลงทะเบียน: รหัส <code>TESR-D05</code> เบอร์ <code>0800000005</code></div>') +
+    '</div></div>';
+  if (msg) document.getElementById('lerr').innerHTML = '<div class="err">' + esc(msg) + '</div>';
+  root.querySelectorAll('[data-tab]').forEach(function (b) { b.onclick = function () { showLogin('', b.dataset.tab); }; });
+  var f = document.getElementById('lf') || document.getElementById('rf');
+  f.onsubmit = function (ev) {
+    ev.preventDefault();
+    var btn = f.querySelector('button[type=submit]'); btn.disabled = true;
+    var g = function (id) { return document.getElementById(id).value; };
+    var req;
+    if (f.id === 'lf') req = api('login', { as: 'emp', username: g('u'), password: g('p') });
+    else {
+      if (g('rw') !== g('rw2')) { document.getElementById('lerr').innerHTML = '<div class="err">รหัสผ่านทั้งสองช่องไม่ตรงกัน</div>'; btn.disabled = false; return; }
+      req = api('register', { code: g('rc'), phone: g('rp'), username: g('ru'), password: g('rw') });
+    }
+    req.then(function (r) { A.store.set(TOKEN, r.token); start(); })
+      .catch(function (e) { document.getElementById('lerr').innerHTML = '<div class="err">' + esc(e.message) + '</div>'; btn.disabled = false; });
+  };
 }
-const Remote={
-  init:()=>call('init'), my:(empId,month)=>call('my',{empId,month}),
-  punch:p=>call('punch',p), photo:(empId,data)=>call('photo',{empId,data}),
-  login:pin=>call('login',{pin}), today:()=>call('today',{pin:PIN}), month:m=>call('month',{pin:PIN,month:m}),
-  saveEmp:emp=>call('saveEmp',{pin:PIN,emp}), delEmp:id=>call('delEmp',{pin:PIN,id}),
-  saveSettings:s=>call('saveSettings',{pin:PIN,settings:s}), qr:()=>call('qr',{pin:PIN}), buildMonth:m=>call('buildMonth',{pin:PIN,month:m})
-};
+function logout(msg) { A.store.set(TOKEN, null); ME = null; MONTHS = {}; REQS = null; showLogin(msg); }
 
-const KEY='tesr-timeclock-v2';
-function seed(){
-  const settings={office:'TESR HQ · นนทบุรี',lat:13.8621,lng:100.5144,radius:1000,start:'08:30',end:'17:30',grace:0,workdays:[1,2,3,4,5],appUrl:''};
-  const emps=[['TESR-001','สมชาย ใจดี','Robotics Engineer'],['TESR-002','กมลวรรณ ศรีสุข','Academy Coordinator'],['TESR-003','ธนพล วงศ์ทอง','Embedded Developer'],['TESR-004','ปิยะนุช แก้วมณี','Shop & Logistics'],['TESR-005','วีระพงษ์ บุญมา','AI / Vision Engineer']]
-    .map((x,i)=>({id:'e'+(i+1),code:x[0],name:x[1],pos:x[2],photo:'',active:true}));
-  let s=7;const rnd=()=>{s=(s*9301+49297)%233280;return s/233280};
-  const recs=[],today=new Date(),T=ymd(today);
-  for(let d=new Date(today.getFullYear(),today.getMonth()-1,1);ymd(d)<=T;d.setDate(d.getDate()+1)){
-    if(d.getDay()===0||d.getDay()===6)continue;const k=ymd(d),isT=k===T;
-    emps.forEach((e,i)=>{
-      if(!isT&&rnd()<0.05)return; if(isT&&i===4)return;
-      let m=8*60+30-Math.floor(rnd()*25); if(rnd()<(i===3?.45:i===0?.25:.12))m=8*60+31+Math.floor(rnd()*40);
-      const o=isT?null:17*60+30+Math.floor(rnd()*50), tin=pad(m/60|0)+':'+pad(m%60);
-      recs.push({date:k,empId:e.id,in:tin,out:o==null?'':pad(o/60|0)+':'+pad(o%60),late:lateOf(tin,settings),inDist:Math.round(40+rnd()*300),outDist:o==null?null:Math.round(40+rnd()*300)});
+/* ================= shell ================= */
+function start() {
+  if (!A.store.get(TOKEN)) return showLogin();
+  root.innerHTML = '<div class="loading">กำลังโหลด…</div>';
+  api('me').then(function (d) {
+    ME = d; calMonth = calMonth || d.today.slice(0, 7);
+    shell(); go(view);
+    if (urlToken) { var t = urlToken; urlToken = ''; var r = ME.rec; if (!r || !r.out) openPunch(r ? 'out' : 'in', t); }
+  }).catch(function (e) { if (e.code !== 'AUTH') showLogin(e.message); });
+}
+function shell() {
+  var tabs = [['home', 'หน้าแรก', 'home'], ['cal', 'ปฏิทิน', 'cal'], ['leave', 'การลา', 'leave'], ['me', 'โปรไฟล์', 'user']];
+  root.innerHTML = '<header class="emp-top"><div class="emp-top-in"><div class="mark">TESR</div><b>Time Clock</b><span class="small" style="margin-left:auto;color:var(--ink-muted)">' + esc(ME.settings.company) + '</span></div></header>' +
+    '<main class="emp-main" id="view"></main>' +
+    '<nav class="tabbar" aria-label="เมนู"><div class="tabbar-in">' + tabs.map(function (t) {
+      return '<button data-go="' + t[0] + '">' + A.ICON[t[2]] + t[1] + (t[0] === 'leave' && ME.pending ? '<span class="badge">' + ME.pending + '</span>' : '') + '</button>';
+    }).join('') + '</div></nav>';
+  root.querySelectorAll('[data-go]').forEach(function (b) { b.onclick = function () { go(b.dataset.go); }; });
+}
+function go(v) {
+  view = v;
+  root.querySelectorAll('[data-go]').forEach(function (b) { if (b.dataset.go === v) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+  var el = document.getElementById('view');
+  ({ home: vHome, cal: vCal, leave: vLeave, me: vMe })[v](el);
+  window.scrollTo(0, 0);
+}
+function month(m, force) {
+  if (MONTHS[m] && !force) return Promise.resolve(MONTHS[m]);
+  return api('myMonth', { month: m }).then(function (d) { MONTHS[m] = d; return d; });
+}
+function refresh() { MONTHS = {}; REQS = null; return api('me').then(function (d) { ME = d; shell(); go(view); }); }
+setInterval(function () { var c = document.getElementById('clock'); if (c) c.textContent = A.hm(new Date()); }, 10000);
+
+/* ================= home ================= */
+function vHome(el) {
+  var e = ME.emp, S = ME.settings, r = ME.rec, now = new Date();
+  var next = !r ? 'in' : (!r.out ? 'out' : 'done');
+  el.innerHTML = '<section class="hero"><div class="who"><span class="avatar lg" style="width:58px;height:58px;font-size:20px">' + (e.photo ? '<img src="' + esc(e.photo) + '" alt="" referrerpolicy="no-referrer">' : esc(e.name.slice(0, 1))) + '</span>' +
+    '<div style="min-width:0"><h2>' + esc(e.name) + '</h2><div class="role">' + esc(e.position || '') + ' · ' + esc(e.code) + '</div></div></div>' +
+    '<div><div class="clock num" id="clock">' + A.hm(now) + '</div><div class="clock-date">' + A.thDate(ME.today, 'long') + '</div></div>' +
+    '<div class="shift">เวลาทำงาน ' + esc(S.start) + '–' + esc(S.end) + ' · ' + esc(S.office) + '</div></section>' +
+    '<div id="todaynote"></div>' +
+    '<div class="punch"><div class="card cell"><div class="lbl">เข้างาน</div><div class="t num">' + (r && r.in || '--:--') + '</div>' +
+    (r ? (r.lateMin ? A.pill('late', 'สาย ' + A.fmtLate(r.lateMin)) : A.pill('ok', 'ตรงเวลา')) : A.pill('idle', 'ยังไม่เช็คอิน')) + '</div>' +
+    '<div class="card cell"><div class="lbl">ออกงาน</div><div class="t num">' + (r && r.out || '--:--') + '</div>' +
+    (r && r.out ? A.pill('ok', 'ลงเวลาแล้ว') : A.pill('idle', 'ยังไม่เช็คเอาท์')) + '</div></div>' +
+    (next === 'done' ? '<button class="btn ghost btn-scan" disabled>วันนี้ลงเวลาครบแล้ว</button>'
+      : '<button class="btn ' + (next === 'in' ? 'primary' : 'gold') + ' btn-scan" id="scan">สแกน QR ' + (next === 'in' ? 'เช็คอินเข้างาน' : 'เช็คเอาท์ออกงาน') + '</button>') +
+    '<section class="stack"><div class="sec-h"><h3>เดือน' + A.TH_MF[now.getMonth()] + '</h3><button class="btn ghost sm" data-go2="cal">ดูปฏิทิน</button></div>' +
+    '<div class="sum-strip num" id="msum"><div><b>–</b><span>มาทำงาน</span></div><div><b>–</b><span>มาสาย</span></div><div><b>–</b><span>สายรวม (นาที)</span></div><div><b>–</b><span>ลา (วัน)</span></div></div>' +
+    '<div class="card"><ul class="list" id="recent"><li class="empty" style="display:block">กำลังโหลด…</li></ul></div></section>';
+  var sb = document.getElementById('scan'); if (sb) sb.onclick = function () { openPunch(next); };
+  el.querySelector('[data-go2]').onclick = function () { go('cal'); };
+  month(ME.today.slice(0, 7)).then(function (d) {
+    var t = d.report.t, today = d.report.days.filter(function (x) { return x.date === ME.today; })[0];
+    document.getElementById('msum').innerHTML = '<div><b>' + t.present + '</b><span>มาทำงาน</span></div><div><b style="color:var(--warn)">' + t.lateDays + '</b><span>มาสาย (ครั้ง)</span></div>' +
+      '<div><b>' + t.lateMin + '</b><span>สายรวม (นาที)</span></div><div><b style="color:var(--leave)">' + A.fmtDays(t.leaveDays) + '</b><span>ลา (วัน)</span></div>';
+    if (today && (today.holiday || today.leave)) {
+      document.getElementById('todaynote').innerHTML = '<div class="note">' + (today.holiday ? 'วันนี้เป็นวันหยุด: ' + esc(today.holiday) : 'วันนี้มีใบลา: ' + esc(A.leaveLabel(today.leave)) + ' (' + A.REQ[today.leave.status][1] + ')') + '</div>';
+    }
+    var past = d.report.days.filter(function (x) { return x.date <= ME.today && (x.work || x.rec || x.leave); }).reverse().slice(0, 7);
+    document.getElementById('recent').innerHTML = past.length ? past.map(dayRow).join('') : '<li class="empty" style="display:block">ยังไม่มีข้อมูลเดือนนี้</li>';
+  }).catch(function (e) { A.toast(e.message); });
+}
+function dayRow(x) {
+  var r = x.rec, d = new Date(x.date + 'T00:00');
+  var tag = x.leave && x.st !== 'leave' ? ' ' + A.pill(x.leave.status === 'approved' ? 'leave' : 'pending', A.leaveLabel(x.leave)) : '';
+  return '<li><div style="width:64px" class="num"><b style="font-family:var(--f-display)">' + d.getDate() + ' ' + A.TH_M[d.getMonth()] + '</b><div class="small muted">' + A.TH_D[d.getDay()] + '</div></div>' +
+    '<div class="grow mono small muted">' + (r ? esc(r.in) + ' → ' + esc(r.out || '--:--') : (x.st === 'leave' ? esc(A.leaveLabel(x.leave)) : '—')) + '</div>' +
+    (x.st === 'late' ? A.pill('late', 'สาย ' + x.late + ' น.') : A.stPill(x.st)) + tag + '</li>';
+}
+
+/* ================= calendar ================= */
+function vCal(el) {
+  el.innerHTML = '<div class="card pad stack"><div class="cal-nav"><button class="icon-btn" id="pv" aria-label="เดือนก่อน">‹</button><h3>' + A.thMonth(calMonth) + '</h3><button class="icon-btn" id="nx" aria-label="เดือนถัดไป">›</button></div>' +
+    '<div class="cal" id="cal"><div class="loading" style="grid-column:1/-1">กำลังโหลด…</div></div>' +
+    '<div class="legend"><span><i class="dot ok"></i>มา</span><span><i class="dot late"></i>สาย</span><span><i class="dot absent"></i>ขาด</span><span><i class="dot leave"></i>ลา</span><span><i class="dot req"></i>ลารออนุมัติ</span><span><i class="dot holiday"></i>วันหยุด</span></div></div>' +
+    '<div class="card" id="dd"></div><div id="adjs"></div>';
+  document.getElementById('pv').onclick = function () { calMonth = A.addMonth(calMonth, -1); selDay = null; vCal(el); };
+  document.getElementById('nx').onclick = function () { calMonth = A.addMonth(calMonth, 1); selDay = null; vCal(el); };
+  month(calMonth).then(function (d) {
+    var by = {}; d.report.days.forEach(function (x) { by[x.date] = x; });
+    if (!selDay || !by[selDay]) selDay = by[ME.today] ? ME.today : d.report.days[0].date;
+    var draw = function () {
+      document.getElementById('cal').innerHTML = A.calendar(calMonth, function (ds) {
+        var x = by[ds], dots = '';
+        if (x.st === 'ok' || x.st === 'late' || x.st === 'absent' || x.st === 'leave') dots += '<i class="dot ' + x.st + '"></i>';
+        if (x.leave && x.st !== 'leave') dots += '<i class="dot ' + (x.leave.status === 'approved' ? 'leave' : 'req') + '"></i>';
+        if (x.holiday) dots += '<i class="dot holiday"></i>';
+        return { html: '<button class="d' + (ds === ME.today ? ' today' : '') + (ds === selDay ? ' sel' : '') + (!x.work ? ' offday' : '') + '" data-d="' + ds + '"><span class="n">' + (+ds.slice(8)) + '</span><span class="dots">' + dots + '</span></button>' };
+      });
+      document.querySelectorAll('#cal [data-d]').forEach(function (b) { b.onclick = function () { selDay = b.dataset.d; draw(); }; });
+      dayDetail(by[selDay], d);
+    };
+    draw();
+    var adj = d.adjustments || [];
+    document.getElementById('adjs').innerHTML = adj.length ? '<div class="card"><div class="panel-h"><h3>คำขอแก้เวลาเดือนนี้</h3></div><ul class="list">' + adj.map(function (a) {
+      return '<li><div class="grow"><b>' + A.thDate(a.date) + '</b> <span class="mono small muted">' + esc(a.in || '--:--') + ' → ' + esc(a.out || '--:--') + '</span><div class="small muted">' + esc(a.reason) + (a.adminNote ? ' · แอดมิน: ' + esc(a.adminNote) : '') + '</div></div>' + A.reqPill(a.status) + '</li>';
+    }).join('') + '</ul></div>' : '';
+  }).catch(function (e) { A.toast(e.message); });
+}
+function dayDetail(x, d) {
+  var el = document.getElementById('dd'), r = x.rec, l = x.leave;
+  var canAdj = x.date <= ME.today && (x.work || r);
+  var canLeave = x.date >= ME.today && x.work && !(l && (l.status === 'approved' || l.status === 'pending'));
+  el.innerHTML = '<div class="day-detail"><div class="between"><h3 style="font-size:17px">' + A.thDate(x.date, 'long') + '</h3>' + (x.st === 'future' ? '' : A.stPill(x.st)) + '</div>' +
+    '<dl class="kv">' +
+    (x.holiday ? '<dt>วันหยุด</dt><dd>' + esc(x.holiday) + '</dd>' : '') +
+    (r ? '<dt>เข้างาน</dt><dd class="mono">' + esc(r.in) + (x.late ? ' <span class="pill late">สาย ' + A.fmtLate(x.late) + '</span>' : '') + '</dd><dt>ออกงาน</dt><dd class="mono">' + esc(r.out || (x.date < ME.today ? 'ไม่ได้เช็คเอาท์' : '--:--')) + '</dd>' + (r.note ? '<dt>หมายเหตุ</dt><dd>' + esc(r.note) + '</dd>' : '') : '') +
+    (l ? '<dt>การลา</dt><dd>' + esc(A.leaveLabel(l)) + ' ' + A.reqPill(l.status) + '<div class="small muted">' + esc(l.reason) + '</div></dd>' : '') +
+    (!r && !l && !x.holiday && x.work && x.date < ME.today ? '<dt>สถานะ</dt><dd>ไม่มีบันทึกเวลา</dd>' : '') +
+    '</dl><div class="row">' +
+    (canAdj ? '<button class="btn ghost sm" id="adjBtn">ขอแก้เวลาวันนี้</button>' : '') +
+    (canLeave ? '<button class="btn primary sm" id="lvBtn">ยื่นลาวันนี้</button>' : '') + '</div></div>';
+  var ab = document.getElementById('adjBtn'); if (ab) ab.onclick = function () { openAdj(x.date, r); };
+  var lb = document.getElementById('lvBtn'); if (lb) lb.onclick = function () { openLeave(x.date); };
+}
+
+/* ================= leave ================= */
+function vLeave(el) {
+  el.innerHTML = '<div class="row"><button class="btn primary" id="newL">ยื่นใบลา</button><button class="btn ghost" id="newA">ขอแก้เวลา</button></div><div id="lv"><div class="loading">กำลังโหลด…</div></div>';
+  document.getElementById('newL').onclick = function () { openLeave(); };
+  document.getElementById('newA').onclick = function () { openAdj(ME.today, ME.rec); };
+  api('myRequests').then(function (d) {
+    REQS = d;
+    var U = d.usage, types = ['personal', 'sick', 'vacation', 'maternity'].filter(function (t) { return t !== 'maternity' || U[t].quota > 0; });
+    var cards = types.map(function (t) {
+      var u = U[t], left = Math.max(0, u.quota - u.used), pct = u.quota ? Math.min(100, u.used / u.quota * 100) : 0;
+      return '<div class="card q"><div class="small muted">' + esc(u.label) + '</div><b class="num">' + A.fmtDays(left) + '</b> <span class="small muted">/ ' + u.quota + ' วัน</span>' +
+        '<div class="bar"><i style="width:' + pct + '%"></i></div><div class="small muted" style="margin-top:4px">ใช้ ' + A.fmtDays(u.used) + (u.pending ? ' · รอ ' + A.fmtDays(u.pending) : '') + '</div></div>';
+    }).join('');
+    var leaves = d.leaves.map(function (l) {
+      var canCancel = l.status === 'pending' || (l.status === 'approved' && l.start > ME.today);
+      return '<li style="align-items:flex-start"><div class="grow stack" style="gap:3px"><div class="between"><b>' + esc(A.leaveLabel(l)) + '</b>' + A.reqPill(l.status) + '</div>' +
+        '<div class="small num">' + A.thRange(l.start, l.end) + ' · ' + A.fmtDays(l.days) + ' วัน</div><div class="small muted">' + esc(l.reason) + '</div>' +
+        (l.adminNote ? '<div class="small" style="color:var(--gold-ink)">แอดมิน: ' + esc(l.adminNote) + '</div>' : '') +
+        (canCancel ? '<div><button class="btn ghost sm" data-cancel="' + esc(l.id) + '">ยกเลิกใบลา</button></div>' : '') + '</div></li>';
+    }).join('');
+    var adjs = d.adjustments.slice(0, 10).map(function (a) {
+      return '<li><div class="grow"><b>' + A.thDate(a.date, 'year') + '</b> <span class="mono small muted">' + esc(a.in || '--:--') + ' → ' + esc(a.out || '--:--') + '</span><div class="small muted">' + esc(a.reason) + (a.adminNote ? ' · แอดมิน: ' + esc(a.adminNote) : '') + '</div></div>' + A.reqPill(a.status) + '</li>';
+    }).join('');
+    document.getElementById('lv').innerHTML = '<section class="stack"><div class="sec-h"><h3>สิทธิ์การลาปี ' + (+ME.today.slice(0, 4) + 543) + '</h3><span class="small muted">คงเหลือ</span></div><div class="quota">' + cards + '</div></section>' +
+      '<section class="stack"><h3 style="font-size:16px">ประวัติใบลา</h3><div class="card"><ul class="list">' + (leaves || '<li class="empty" style="display:block">ยังไม่มีใบลา</li>') + '</ul></div></section>' +
+      (adjs ? '<section class="stack"><h3 style="font-size:16px">คำขอแก้เวลา</h3><div class="card"><ul class="list">' + adjs + '</ul></div></section>' : '');
+    document.querySelectorAll('[data-cancel]').forEach(function (b) {
+      b.onclick = function () {
+        if (b.dataset.armed) {
+          b.disabled = true;
+          api('leaveCancel', { id: b.dataset.cancel }).then(function () { A.toast('ยกเลิกใบลาแล้ว'); refresh(); }).catch(function (e) { A.toast(e.message); b.disabled = false; });
+        } else { b.dataset.armed = '1'; b.textContent = 'กดอีกครั้งเพื่อยืนยันการยกเลิก'; b.className = 'btn danger sm'; }
+      };
     });
-  }
-  return {settings,employees:emps,records:recs,holidays:[{date:ymd(new Date(today.getFullYear(),today.getMonth(),13)),name:'วันหยุดตัวอย่าง'}]};
+  }).catch(function (e) { document.getElementById('lv').innerHTML = '<div class="err">' + esc(e.message) + '</div>'; });
 }
-let DB=(()=>{try{const v=store.get(KEY);if(v)return JSON.parse(v)}catch(e){}return seed()})();
-const saveDB=()=>store.set(KEY,JSON.stringify(DB));saveDB();
-function localToken(date){let h=7;for(const c of 'TESR|'+date)h=(h*31+c.charCodeAt(0))>>>0;return h.toString(36).toUpperCase()}
-const pubEmp=e=>({id:e.id,code:e.code,name:e.name,pos:e.pos,photo:e.photo});
-function localWorkdays(m){const[y,mo]=m.split('-').map(Number),T=ymd(new Date()),hol=DB.holidays.map(h=>h.date),out=[];
-  for(let d=new Date(y,mo-1,1);d.getMonth()===mo-1;d.setDate(d.getDate()+1)){const k=ymd(d);if(k>T)break;if(DB.settings.workdays.includes(d.getDay())&&!hol.includes(k))out.push(k)}return out}
-const wait=v=>new Promise(r=>setTimeout(()=>r(JSON.parse(JSON.stringify(v))),120));
-const Local={
-  init:()=>wait({settings:DB.settings,employees:DB.employees.filter(e=>e.active).map(pubEmp),today:ymd(new Date())}),
-  my:(id,m)=>wait(DB.records.filter(r=>r.empId===id&&r.date.startsWith(m))),
-  async punch(p){
-    const s=DB.settings,date=ymd(new Date()),time=p.time||hm(new Date());
-    if(p.token!==localToken(date))throw new Error('QR Code ไม่ถูกต้องหรือหมดอายุ (ใช้ได้เฉพาะ QR ของวันนี้)');
-    const dist=Math.round(haversine(p.lat,p.lng,s.lat,s.lng));
-    if(dist>s.radius)throw new Error(`อยู่ห่างออฟฟิศ ${fmtDist(dist)} เกินรัศมีที่อนุญาต ${fmtDist(s.radius)}`);
-    let r=DB.records.find(x=>x.empId===p.empId&&x.date===date);
-    if(r){if(r.out)throw new Error('วันนี้ลงเวลาเข้า–ออกครบแล้ว');r.out=time;r.outDist=dist;saveDB();return wait({kind:'out',rec:r})}
-    r={date,empId:p.empId,in:time,out:'',late:lateOf(time,s),inDist:dist,outDist:null};DB.records.push(r);saveDB();return wait({kind:'in',rec:r});
-  },
-  async photo(id,data){const e=DB.employees.find(x=>x.id===id);e.photo=data;saveDB();return wait({url:data})},
-  login:()=>wait(true),
-  today:()=>{const d=ymd(new Date());return wait({employees:DB.employees.filter(e=>e.active).map(pubEmp),records:DB.records.filter(r=>r.date===d),today:d})},
-  month:m=>{const recs=DB.records.filter(r=>r.date.startsWith(m)),ids=new Set(recs.map(r=>r.empId));
-    return wait({employees:DB.employees.filter(e=>e.active||ids.has(e.id)).map(pubEmp),records:recs,workdays:localWorkdays(m),holidays:DB.holidays.filter(h=>h.date.startsWith(m)),today:ymd(new Date())})},
-  async saveEmp(e){if(e.id){Object.assign(DB.employees.find(x=>x.id===e.id),{code:e.code,name:e.name,pos:e.pos})}else{if(DB.employees.some(x=>x.active&&x.code===e.code))throw new Error('รหัสพนักงาน '+e.code+' มีอยู่แล้ว');e={...e,id:uid(),photo:'',active:true};DB.employees.push(e)}saveDB();return wait({id:e.id})},
-  async delEmp(id){DB.employees.find(x=>x.id===id).active=false;saveDB();return wait(true)},
-  async saveSettings(s){delete s.adminPin;if(typeof s.workdays==='string')s.workdays=s.workdays.split(',').filter(Boolean).map(Number);Object.assign(DB.settings,s);saveDB();return wait(DB.settings)},
-  qr:()=>{const d=ymd(new Date()),t=localToken(d),u=DB.settings.appUrl;return wait({date:d,token:t,payload:u?u.replace(/[?#].*$/,'')+'?t='+t:`TESR-ATTEND|${d}|${t}`})},
-  buildMonth:()=>wait({url:''})
-};
-const API=REMOTE?Remote:Local;
-
-/* ================= APP STATE ================= */
-let APP={settings:null,employees:[],today:ymd(new Date())};
-let me=store.get('tesr-tc-me');
-let urlToken='';
-try{const q=new URLSearchParams(location.search);urlToken=q.get('t')||'';if(urlToken)history.replaceState(null,'',location.pathname)}catch(e){}
-
-const vEmp=document.getElementById('view-emp'),vAdm=document.getElementById('view-adm');
-document.getElementById('modeBadge').textContent=REMOTE?'Google Sheet':'Demo';
-document.getElementById('modeBadge').classList.toggle('live',REMOTE);
-document.getElementById('demoNote').hidden=REMOTE;
-function setMode(m){document.getElementById('m-emp').setAttribute('aria-pressed',m==='emp');document.getElementById('m-adm').setAttribute('aria-pressed',m==='adm');vEmp.hidden=m!=='emp';vAdm.hidden=m!=='adm';m==='emp'?renderEmp():renderAdm()}
-document.getElementById('m-emp').onclick=()=>setMode('emp');
-document.getElementById('m-adm').onclick=()=>setMode('adm');
-document.getElementById('reset').onclick=async()=>{DB=seed();saveDB();await boot();toast('รีเซ็ตเป็นข้อมูลตัวอย่างแล้ว')};
-const avatar=(e,sm)=>`<span class="avatar${sm?' sm':''}">${e.photo?`<img src="${esc(e.photo)}" alt="" referrerpolicy="no-referrer">`:esc((e.name.trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('')))}</span>`;
-const errBox=m=>`<div class="err">${esc(m)}</div>`;
-
-async function boot(){
-  try{APP=await API.init()}catch(e){vEmp.innerHTML=`<div class="phone">${errBox(e.message)}</div>`;return}
-  setMode(vAdm.hidden?'emp':'adm');
+function workdaysBetween(a, b, part) {
+  var wd = ME.settings.workdays;
+  if (part !== 'full') return wd.indexOf(TC.util.dow(a)) >= 0 ? 0.5 : 0;
+  return TC.util.range(a, b).filter(function (d) { return wd.indexOf(TC.util.dow(d)) >= 0; }).length;
 }
-
-/* ================= EMPLOYEE ================= */
-async function renderEmp(){
-  if(!APP.employees.length){vEmp.innerHTML='<div class="phone"><div class="card empty">ยังไม่มีพนักงาน · เพิ่มได้ที่โหมดแอดมิน</div></div>';return}
-  if(!APP.employees.some(e=>e.id===me)){me=APP.employees[0].id}
-  const e=APP.employees.find(x=>x.id===me),now=new Date(),T=ymd(now),S=APP.settings;
-  let mine=[];try{mine=await API.my(me,T.slice(0,7))}catch(err){toast(err.message)}
-  mine.sort((a,b)=>b.date.localeCompare(a.date));
-  const r=mine.find(x=>x.date===T),lm=r?r.late:0,next=!r?'in':(!r.out?'out':'done');
-  const totalLate=mine.reduce((s,x)=>s+(+x.late||0),0),lateDays=mine.filter(x=>x.late>0).length;
-  vEmp.innerHTML=`<div class="phone">
-    <div class="who"><label for="who" style="font-size:12.5px;color:var(--muted)">ฉันคือ</label>
-      <select id="who">${APP.employees.map(x=>`<option value="${x.id}"${x.id===me?' selected':''}>${esc(x.name)} · ${esc(x.code)}</option>`).join('')}</select></div>
-    <div class="hero">
-      <div class="hero-top">
-        <label for="photo" title="เปลี่ยนรูปโปรไฟล์" style="cursor:pointer">${avatar(e)}</label>
-        <div style="min-width:0"><h2>${esc(e.name)}</h2><div class="role">${esc(e.pos)} · ${esc(e.code)}</div>
-        <label for="photo" style="font-size:12.5px;color:var(--gold);cursor:pointer;text-decoration:underline">อัปโหลดรูปโปรไฟล์</label>
-        <input type="file" id="photo" accept="image/*" hidden></div>
-      </div>
-      <div><div class="clock num" id="clock">${hm(now)}</div>
-      <div class="clock-date">วัน${TH_DF[now.getDay()]}ที่ ${now.getDate()} ${TH_MF[now.getMonth()]} ${now.getFullYear()+543}</div></div>
-      <div class="shift">กะทำงาน ${esc(S.start)}–${esc(S.end)} · ${esc(S.office)}</div>
-    </div>
-    <div class="punch">
-      <div class="cell"><div class="lbl">เข้างาน</div><div class="t num">${r?.in||'--:--'}</div>
-        ${r?(lm?`<span class="pill late">สาย ${fmtLate(lm)}</span>`:'<span class="pill ok">ตรงเวลา</span>'):'<span class="pill idle">ยังไม่เช็คอิน</span>'}</div>
-      <div class="cell"><div class="lbl">ออกงาน</div><div class="t num">${r?.out||'--:--'}</div>
-        ${r?.out?'<span class="pill ok">ลงเวลาแล้ว</span>':'<span class="pill idle">ยังไม่เช็คเอาท์</span>'}</div>
-    </div>
-    ${next==='done'?'<button class="btn ghost btn-scan" disabled>วันนี้ลงเวลาครบแล้ว</button>'
-      :`<button class="btn ${next==='in'?'primary':'gold'} btn-scan" id="scan">สแกน QR ${next==='in'?'เช็คอินเข้างาน':'เช็คเอาท์ออกงาน'}</button>`}
-    <div><div class="sec-h"><h3>เดือน${TH_MF[now.getMonth()]}</h3><span>สรุปของฉัน</span></div>
-      <div class="sum-strip num"><div><b>${mine.length}</b><span>วันที่มาทำงาน</span></div><div><b style="color:var(--warn)">${lateDays}</b><span>วันที่มาสาย</span></div><div><b>${totalLate}</b><span>นาทีสายรวม</span></div></div></div>
-    <div class="card"><ul class="hist">${mine.length?mine.map(x=>{const d=new Date(x.date+'T00:00');
-      return `<li><div class="d num">${d.getDate()} ${TH_M[d.getMonth()]}<small>${TH_D[d.getDay()]}</small></div><div class="tt num">${x.in} → ${x.out||'--:--'}</div>${x.late>0?`<span class="pill late">สาย ${x.late} น.</span>`:'<span class="pill ok">ตรงเวลา</span>'}</li>`}).join(''):'<li class="empty" style="display:block">ยังไม่มีประวัติเดือนนี้</li>'}</ul></div>
-  </div>`;
-  document.getElementById('who').onchange=ev=>{me=ev.target.value;store.set('tesr-tc-me',me);renderEmp()};
-  document.getElementById('photo').onchange=ev=>readPhoto(ev.target.files[0],async url=>{
-    try{const res=await API.photo(me,url);e.photo=REMOTE?res.url+'?v='+Date.now():url;renderEmp();toast('อัปเดตรูปโปรไฟล์แล้ว')}catch(err){toast(err.message)}});
-  const sb=document.getElementById('scan');if(sb)sb.onclick=()=>openPunch(next);
-  if(urlToken&&next!=='done'){const t=urlToken;urlToken='';openPunch(next,t)}
-}
-setInterval(()=>{const c=document.getElementById('clock');if(c)c.textContent=hm(new Date())},15000);
-
-function readPhoto(file,cb){if(!file)return;const fr=new FileReader();fr.onload=()=>{const img=new Image();img.onload=()=>{const c=document.createElement('canvas'),z=320;c.width=c.height=z;const k=Math.min(img.width,img.height);c.getContext('2d').drawImage(img,(img.width-k)/2,(img.height-k)/2,k,k,0,0,z,z);cb(c.toDataURL('image/jpeg',.82))};img.src=fr.result};fr.readAsDataURL(file)}
-
-/* ---------- punch sheet: 1) QR  2) GPS  3) ยืนยัน ---------- */
-const modal=document.getElementById('modal');
-function openPunch(kind,presetToken){
-  let token=presetToken||'',pos=null,stopCam=null,src='sim-in';
-  const S=APP.settings;
-  modal.hidden=false;
-  modal.innerHTML=`<div class="sheet" role="dialog" aria-modal="true" aria-label="ลงเวลา">
-    <div class="viewfinder" id="vf"><video id="vid" muted playsinline hidden></video><div class="frame"><i></i><i></i><i></i><i></i><div class="laser"></div></div><div class="vf-cap" id="vfcap">เล็ง QR Code ที่ติดหน้าออฟฟิศ</div></div>
-    <div class="sheet-body">
-      <div class="steps"><div class="step" id="st-qr"><span class="dot"></span><div id="st-qr-t">รอสแกน QR Code</div></div>
-      <div class="step" id="st-geo"><span class="dot"></span><div id="st-geo-t">กำลังหาตำแหน่ง…</div></div></div>
-      ${REMOTE?'':`<details open><summary style="cursor:pointer;font-size:13px;color:var(--muted)">โหมดทดลอง</summary>
-        <div class="row" style="margin-top:10px">
-          <div class="field"><label for="src">ตำแหน่งมือถือ</label><select id="src"><option value="sim-in">จำลอง: อยู่ในออฟฟิศ (~180 ม.)</option><option value="sim-out">จำลอง: นอกพื้นที่ (~3.4 กม.)</option><option value="gps">GPS จริงของเครื่อง</option></select></div>
-          <div class="field"><label for="tm">เวลาที่สแกน</label><input id="tm" type="time" value="${hm(new Date())}"></div></div>
-        <button class="btn ghost sm" id="fakeqr" style="margin-top:10px">จำลองการสแกน QR</button></details>`}
-      <div id="res"></div>
-      <div class="row"><button class="btn ghost" id="cl">ยกเลิก</button><button class="btn ${kind==='in'?'primary':'gold'}" id="go" disabled>ยืนยัน${kind==='in'?'เช็คอิน':'เช็คเอาท์'}</button></div>
-    </div></div>`;
-  const $=id=>document.getElementById(id);
-  function setStep(id,cls,html){$(id).className='step '+(cls||'');$(id+'-t').innerHTML=html}
-  function ready(){$('go').disabled=!(token&&pos&&pos.dist<=S.radius)}
-  function gotToken(t){token=parseToken(t);if(stopCam){stopCam();stopCam=null}$('vid').hidden=true;setStep('st-qr','ok','<b>อ่าน QR แล้ว</b>');$('vfcap').textContent='อ่าน QR สำเร็จ';ready()}
-  function showPos(){const d=haversine(pos.lat,pos.lng,S.lat,S.lng);pos.dist=d;const ok=d<=S.radius;
-    setStep('st-geo',ok?'ok':'bad',`<b>${ok?'อยู่ในพื้นที่':'อยู่นอกพื้นที่'}</b> · ห่างออฟฟิศ <span class="num">${fmtDist(d)}</span><br><small>อนุญาตไม่เกิน ${fmtDist(S.radius)} · ${pos.label}</small>`);ready()}
-  function gps(){
-    pos=null;setStep('st-geo','','กำลังขอตำแหน่ง GPS…');ready();
-    if(!navigator.geolocation){setStep('st-geo','bad','<b>เครื่องนี้ไม่รองรับ GPS</b>');return}
-    navigator.geolocation.getCurrentPosition(p=>{pos={lat:p.coords.latitude,lng:p.coords.longitude,label:`GPS ±${Math.round(p.coords.accuracy)} ม.`};showPos()},
-      ()=>setStep('st-geo','bad','<b>ไม่ได้รับสิทธิ์ตำแหน่ง</b><br><small>เปิด Location ให้เบราว์เซอร์แล้วลองใหม่</small>'),{enableHighAccuracy:true,timeout:10000,maximumAge:0});
-  }
-  function locate(){if(src==='sim-in'){pos={lat:S.lat+.0012,lng:S.lng+.0011,label:'ตำแหน่งจำลอง'};showPos()}else if(src==='sim-out'){pos={lat:S.lat+.025,lng:S.lng+.022,label:'ตำแหน่งจำลอง'};showPos()}else gps()}
-  async function camera(){
-    if(!navigator.mediaDevices?.getUserMedia||!window.jsQR){$('vfcap').textContent='เปิดกล้องไม่ได้ · สแกน QR ด้วยกล้องมือถือแทนได้';return}
-    try{
-      const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:false});
-      const v=$('vid');v.srcObject=stream;v.hidden=false;await v.play();
-      const c=document.createElement('canvas'),ctx=c.getContext('2d',{willReadFrequently:true});let stop=false;
-      stopCam=()=>{stop=true;stream.getTracks().forEach(t=>t.stop())};
-      (function tick(){if(stop)return;if(v.readyState>=2&&v.videoWidth){const k=Math.min(1,640/v.videoWidth);c.width=v.videoWidth*k|0;c.height=v.videoHeight*k|0;ctx.drawImage(v,0,0,c.width,c.height);
-        const q=jsQR(ctx.getImageData(0,0,c.width,c.height).data,c.width,c.height,{inversionAttempts:'dontInvert'});if(q&&q.data){gotToken(q.data);return}}requestAnimationFrame(tick)})();
-    }catch(e){$('vfcap').textContent=REMOTE?'ไม่ได้รับสิทธิ์กล้อง · อนุญาตกล้องแล้วลองใหม่':'กล้องใช้ไม่ได้ในหน้านี้ · กด "จำลองการสแกน QR"'}
-  }
-  if(token)gotToken(token);else camera();
-  if(REMOTE)gps();else{locate();$('src').onchange=ev=>{src=ev.target.value;locate()};$('fakeqr').onclick=()=>gotToken(`TESR-ATTEND|${ymd(new Date())}|${localToken(ymd(new Date()))}`)}
-  function close(){if(stopCam)stopCam();modal.hidden=true;modal.innerHTML='';renderEmp()}
-  $('cl').onclick=close;
-  $('go').onclick=async()=>{
-    const go=$('go');go.disabled=true;go.textContent='กำลังบันทึก…';
-    try{
-      const res=await API.punch({empId:me,token,lat:pos.lat,lng:pos.lng,time:REMOTE?undefined:$('tm').value});
-      const r=res.rec;
-      $('res').innerHTML=res.kind==='in'
-        ?`<div class="result ${r.late?'late':'ok'}"><h3 class="num">เช็คอิน ${r.in}</h3>${r.late?`มาสาย ${fmtLate(r.late)}`:'ตรงเวลา ขอให้เป็นวันที่ดี'}</div>`
-        :`<div class="result ok"><h3 class="num">เช็คเอาท์ ${r.out}</h3>บันทึกเวลาออกงานแล้ว</div>`;
-      go.textContent='เสร็จสิ้น';go.disabled=false;go.onclick=close;
-    }catch(err){$('res').innerHTML=`<div class="result bad"><h3>ลงเวลาไม่สำเร็จ</h3>${esc(err.message)}</div>`;go.textContent='ลองอีกครั้ง';ready()}
+function openLeave(date) {
+  var U = (REQS && REQS.usage) || ME.usage, part = 'full';
+  var types = Object.keys(TC.LEAVE_TYPES).filter(function (t) { return t !== 'maternity' || (U[t] && U[t].quota > 0); });
+  date = date || ME.today;
+  A.modal('<div class="sheet-h"><h3>ยื่นใบลา</h3><button class="x" data-close aria-label="ปิด">×</button></div><form class="sheet-b" id="lf2">' +
+    '<div class="field"><label for="lt">ประเภทการลา</label><select id="lt">' + types.map(function (t) {
+      var u = U[t]; return '<option value="' + t + '">' + TC.LEAVE_TYPES[t] + (u && u.quota !== null ? ' (เหลือ ' + A.fmtDays(Math.max(0, u.quota - u.used - u.pending)) + ' วัน)' : '') + '</option>';
+    }).join('') + '</select></div>' +
+    '<div class="field"><span class="lbl">ช่วงเวลา</span><div class="seg" id="pt"><button type="button" data-p="full" aria-pressed="true">เต็มวัน</button><button type="button" data-p="am" aria-pressed="false">ครึ่งวันเช้า</button><button type="button" data-p="pm" aria-pressed="false">ครึ่งวันบ่าย</button></div></div>' +
+    '<div class="row"><div class="field"><label for="ls">ตั้งแต่วันที่</label><input id="ls" type="date" value="' + date + '" required></div>' +
+    '<div class="field" id="leW"><label for="le">ถึงวันที่</label><input id="le" type="date" value="' + date + '" required></div></div>' +
+    '<div class="field"><label for="lr">เหตุผลการลา</label><textarea id="lr" required placeholder="เช่น ไปทำธุระที่ธนาคาร / ไข้หวัด มีใบรับรองแพทย์"></textarea></div>' +
+    '<div class="note" id="lcalc"></div><div id="lerr2"></div>' +
+    '<button class="btn primary block" type="submit">ส่งใบลาให้แอดมินอนุมัติ</button></form>');
+  var calc = function () {
+    var s = document.getElementById('ls').value, e = part === 'full' ? document.getElementById('le').value : s;
+    if (e < s) { document.getElementById('le').value = s; e = s; }
+    var n = s ? workdaysBetween(s, e, part) : 0;
+    document.getElementById('lcalc').textContent = 'ประมาณ ' + A.fmtDays(n) + ' วันทำงาน · ระบบจะหักวันหยุดบริษัทให้อัตโนมัติ';
   };
-}
-
-/* ================= ADMIN ================= */
-let tab='today',repMonth=ymd(new Date()).slice(0,7),confirmDel=null,editId=null,selEmp=null;
-async function renderAdm(){
-  if(REMOTE&&!PIN){
-    vAdm.innerHTML=`<form class="card login" id="lf"><h3>เข้าสู่ระบบแอดมิน</h3><div class="field"><label for="pin">รหัส PIN</label><input id="pin" type="password" inputmode="numeric" autocomplete="current-password" required></div><div id="lerr"></div><button class="btn primary" type="submit">เข้าสู่ระบบ</button></form>`;
-    document.getElementById('lf').onsubmit=async ev=>{ev.preventDefault();const p=document.getElementById('pin').value;
-      try{PIN=p;await Remote.login(p);sess.set('tesr-tc-pin',p);renderAdm()}catch(e){PIN='';document.getElementById('lerr').innerHTML=errBox(e.message)}};
-    return;
-  }
-  const T=[['today','ภาพรวมวันนี้'],['emps','พนักงาน'],['report','รายงานรายเดือน'],['set','ตั้งค่า & QR Code']];
-  vAdm.innerHTML=`<div class="tabs" role="tablist">${T.map(([k,v])=>`<button role="tab" data-t="${k}" aria-selected="${tab===k}">${v}</button>`).join('')}${REMOTE?'<button id="logout" style="margin-left:auto">ออกจากระบบ</button>':''}</div><div id="tabbody"><div class="loading">กำลังโหลด…</div></div>`;
-  vAdm.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{tab=b.dataset.t;renderAdm()});
-  const lo=document.getElementById('logout');if(lo)lo.onclick=()=>{PIN='';sess.set('tesr-tc-pin','');renderAdm()};
-  const el=document.getElementById('tabbody');
-  try{await ({today:admToday,emps:admEmps,report:admReport,set:admSet})[tab](el)}
-  catch(e){el.innerHTML=errBox(e.message);if(/PIN/.test(e.message)){PIN='';sess.set('tesr-tc-pin','')}}
-}
-
-async function admToday(el){
-  const d=await API.today(),by={};d.records.forEach(r=>by[r.empId]=r);
-  const rows=d.employees.map(e=>({e,r:by[e.id]}));
-  const inN=rows.filter(x=>x.r).length,lateN=rows.filter(x=>x.r&&x.r.late>0).length,outN=rows.filter(x=>x.r?.out).length;
-  el.innerHTML=`<div class="kpis num">
-    <div class="card kpi k-in"><span>เช็คอินแล้ว</span><b>${inN}<small style="font-size:15px;color:var(--muted)"> / ${rows.length}</small></b></div>
-    <div class="card kpi k-late"><span>มาสายวันนี้</span><b>${lateN}</b></div>
-    <div class="card kpi k-abs"><span>ยังไม่เข้างาน</span><b>${rows.length-inN}</b></div>
-    <div class="card kpi"><span>เช็คเอาท์แล้ว</span><b>${outN}</b></div></div>
-    <div class="card tbl-wrap"><table><thead><tr><th>พนักงาน</th><th>สถานะ</th><th class="r">เข้างาน</th><th class="r">ออกงาน</th><th class="r">สาย (นาที)</th><th class="r">ระยะตอนสแกน</th></tr></thead><tbody>
-    ${rows.map(({e,r})=>`<tr><td><div class="person">${avatar(e,1)}<div>${esc(e.name)}<small>${esc(e.pos)}</small></div></div></td>
-      <td>${!r?'<span class="pill bad">ยังไม่เข้างาน</span>':r.late>0?'<span class="pill late">มาสาย</span>':'<span class="pill ok">ตรงเวลา</span>'}</td>
-      <td class="r num">${r?.in||'—'}</td><td class="r num">${r?.out||'—'}</td><td class="r num">${r?r.late:'—'}</td><td class="r num">${r&&r.inDist!=null?fmtDist(r.inDist):'—'}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">ยังไม่มีพนักงาน</td></tr>'}
-    </tbody></table></div>`;
-}
-
-async function admEmps(el){
-  const ed=editId?APP.employees.find(e=>e.id===editId):null;
-  el.innerHTML=`<div class="grid2">
-   <div class="card tbl-wrap"><table><thead><tr><th>พนักงาน</th><th>รหัส</th><th class="r">จัดการ</th></tr></thead><tbody>
-   ${APP.employees.map(e=>`<tr><td><div class="person">${avatar(e,1)}<div>${esc(e.name)}<small>${esc(e.pos)}</small></div></div></td><td class="num">${esc(e.code)}</td>
-   <td class="r">${confirmDel===e.id?`<span class="confirm">นำออกจากรายชื่อ? <button class="btn sm primary" data-del="${e.id}">ยืนยัน</button><button class="btn sm ghost" data-cancel>ไม่</button></span>`
-     :`<button class="btn sm ghost" data-edit="${e.id}">แก้ไข</button> <button class="btn sm ghost" data-ask="${e.id}">ลบ</button>`}</td></tr>`).join('')||'<tr><td colspan="3" class="empty">ยังไม่มีพนักงาน</td></tr>'}
-   </tbody></table></div>
-   <form class="card panel" id="ef"><h3>${ed?'แก้ไขข้อมูลพนักงาน':'เพิ่มพนักงานใหม่'}</h3>
-     <div class="field"><label for="f-name">ชื่อ–นามสกุล</label><input id="f-name" required value="${esc(ed?.name||'')}"></div>
-     <div class="row"><div class="field"><label for="f-code">รหัสพนักงาน</label><input id="f-code" required value="${esc(ed?.code||'TESR-'+String(APP.employees.length+1).padStart(3,'0'))}"></div>
-     <div class="field"><label for="f-pos">ตำแหน่ง</label><input id="f-pos" value="${esc(ed?.pos||'')}"></div></div>
-     <div id="ferr"></div>
-     <div class="row"><button class="btn primary" type="submit">${ed?'บันทึกการแก้ไข':'เพิ่มพนักงาน'}</button>${ed?'<button class="btn ghost" type="button" id="f-x">ยกเลิก</button>':''}</div>
-     <small style="color:var(--muted)">ลบแล้วประวัติเดือนเก่ายังอยู่ในรายงาน · รูปโปรไฟล์ให้พนักงานอัปโหลดเองจากมือถือ</small>
-   </form></div>`;
-  const re=async()=>{APP=await API.init();admEmps(el)};
-  el.querySelectorAll('[data-ask]').forEach(b=>b.onclick=()=>{confirmDel=b.dataset.ask;admEmps(el)});
-  el.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=()=>{confirmDel=null;admEmps(el)});
-  el.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{b.disabled=true;try{await API.delEmp(b.dataset.del);confirmDel=null;await re();toast('นำออกจากรายชื่อแล้ว')}catch(e){toast(e.message)}});
-  el.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>{editId=b.dataset.edit;admEmps(el)});
-  const x=document.getElementById('f-x');if(x)x.onclick=()=>{editId=null;admEmps(el)};
-  document.getElementById('ef').onsubmit=async ev=>{ev.preventDefault();
-    const v={id:ed?.id,name:document.getElementById('f-name').value.trim(),code:document.getElementById('f-code').value.trim(),pos:document.getElementById('f-pos').value.trim()};
-    try{await API.saveEmp(v);editId=null;await re();toast(ed?'บันทึกการแก้ไขแล้ว':'เพิ่ม '+v.name+' แล้ว')}catch(e){document.getElementById('ferr').innerHTML=errBox(e.message)}};
-}
-
-function calcMonth(d){
-  return d.employees.map(e=>{
-    const rs=d.records.filter(r=>r.empId===e.id),by={};rs.forEach(r=>by[r.date]=r);
-    const dates=[...new Set([...d.workdays,...rs.map(r=>r.date)])].sort();
-    const days=dates.map(k=>{const r=by[k],off=!d.workdays.includes(k);
-      return {date:k,r,off,st:r?(r.late>0?'late':'ok'):(k===d.today?'pending':'absent')}});
-    const mins=rs.filter(r=>r.out).reduce((s,r)=>s+toMin(r.out)-toMin(r.in),0);
-    return {e,days,present:rs.length,lateDays:rs.filter(r=>r.late>0).length,lateMin:rs.reduce((s,r)=>s+(+r.late||0),0),
-      absent:days.filter(x=>x.st==='absent').length,noOut:rs.filter(r=>!r.out&&r.date<d.today).length,hours:mins/60,work:d.workdays.filter(k=>k<d.today||by[k]).length};
+  document.querySelectorAll('#pt [data-p]').forEach(function (b) {
+    b.onclick = function () { part = b.dataset.p; document.querySelectorAll('#pt [data-p]').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); document.getElementById('leW').hidden = part !== 'full'; calc(); };
   });
-}
-const ST={ok:['ok','มา'],late:['late','สาย'],absent:['bad','ขาด'],pending:['idle','ยังไม่เข้างาน']};
-async function admReport(el){
-  const d=await API.month(repMonth),rows=calcMonth(d),max=Math.max(1,...rows.map(r=>r.lateMin));
-  const [y,mo]=repMonth.split('-').map(Number),now=new Date();
-  const months=[];for(let i=0;i<12;i++){const t=new Date(now.getFullYear(),now.getMonth()-i,1);months.push(ymd(t).slice(0,7))}
-  if(!rows.some(r=>r.e.id===selEmp))selEmp=rows[0]?.e.id;
-  const sel=rows.find(r=>r.e.id===selEmp);
-  el.innerHTML=`<div class="toolbar">
-    <div class="field"><label for="rm">เดือน</label><select id="rm">${months.map(m=>{const[a,b]=m.split('-').map(Number);return `<option value="${m}"${m===repMonth?' selected':''}>${TH_MF[b-1]} ${a+543}</option>`}).join('')}</select></div>
-    ${REMOTE?'<button class="btn primary sm" id="bs">อัปเดตชีตสรุปใน Google Sheets</button>':''}
-    <button class="btn gold sm" id="xs">Export สรุป (CSV)</button><button class="btn ghost sm" id="xd">Export รายวัน (CSV)</button></div>
-    <div id="bsout"></div>
-    <div class="card tbl-wrap"><table><thead><tr><th>พนักงาน</th><th class="r">วันทำงาน</th><th class="r">มา</th><th class="r">ขาด</th><th class="r">สาย (วัน)</th><th>รวมเวลาสาย</th><th class="r">ลืมเช็คเอาท์</th><th class="r">ชั่วโมงทำงาน</th></tr></thead><tbody>
-    ${rows.map(r=>`<tr class="clickable${r.e.id===selEmp?' sel':''}" data-emp="${r.e.id}"><td><div class="person">${avatar(r.e,1)}<div>${esc(r.e.name)}<small>${esc(r.e.code)}</small></div></div></td>
-      <td class="r num">${r.work}</td><td class="r num">${r.present}</td><td class="r num" style="color:${r.absent?'var(--bad)':'inherit'}">${r.absent}</td><td class="r num">${r.lateDays}</td>
-      <td><div style="display:flex;align-items:center;gap:10px"><span class="num" style="min-width:64px;font-weight:600;color:${r.lateMin?'var(--warn)':'var(--muted)'}">${r.lateMin} นาที</span><div class="bar" style="flex:1"><i style="width:${r.lateMin/max*100}%"></i></div></div></td>
-      <td class="r num">${r.noOut}</td><td class="r num">${r.hours.toFixed(1)}</td></tr>`).join('')||'<tr><td colspan="8" class="empty">ไม่มีข้อมูล</td></tr>'}
-    </tbody></table></div>
-    ${sel?`<div class="detail-h"><h3 style="font-size:17px">รายวัน · ${esc(sel.e.name)}</h3><span style="color:var(--muted);font-size:13px">แตะชื่อในตารางด้านบนเพื่อดูคนอื่น</span></div>
-    <div class="card tbl-wrap"><table><thead><tr><th>วันที่</th><th>สถานะ</th><th class="r">เข้างาน</th><th class="r">ออกงาน</th><th class="r">สาย (นาที)</th></tr></thead><tbody>
-    ${sel.days.map(x=>{const[c,t]=ST[x.st];return `<tr><td class="num">${thDate(x.date)}${x.off?' <small style="color:var(--muted)">(วันหยุด)</small>':''}</td><td><span class="pill ${c}">${t}</span></td>
-      <td class="r num">${x.r?.in||'—'}</td><td class="r num">${x.r?(x.r.out||(x.date<d.today?'<span style="color:var(--bad)">ไม่ได้เช็คเอาท์</span>':'—')):'—'}</td><td class="r num">${x.r?x.r.late:'—'}</td></tr>`}).join('')||'<tr><td colspan="5" class="empty">ยังไม่มีวันทำงานในเดือนนี้</td></tr>'}
-    </tbody></table></div>`:''}
-    <div id="xout"></div>
-    <p style="font-size:12.5px;color:var(--muted)">นับสายเมื่อเช็คอินหลัง ${esc(APP.settings.start)}${+APP.settings.grace?` (ผ่อนผัน ${APP.settings.grace} นาที)`:''} · นับวันขาดเฉพาะวันทำงานที่ผ่านมาแล้ว ไม่รวมวันหยุด${d.holidays.length?' ('+d.holidays.map(h=>esc(h.name)+' '+thDate(h.date)).join(', ')+')':''} · ${TH_MF[mo-1]} ${y+543}</p>`;
-  document.getElementById('rm').onchange=ev=>{repMonth=ev.target.value;renderAdm()};
-  el.querySelectorAll('[data-emp]').forEach(tr=>tr.onclick=()=>{selEmp=tr.dataset.emp;admReport(el)});
-  const bs=document.getElementById('bs');if(bs)bs.onclick=async()=>{bs.disabled=true;bs.textContent='กำลังสร้างชีต…';
-    try{const r=await API.buildMonth(repMonth);document.getElementById('bsout').innerHTML=`<p>อัปเดตชีต "สรุป ${repMonth}" แล้ว · <a class="link" href="${esc(r.url)}" target="_blank" rel="noopener">เปิด Google Sheet ↗</a></p>`}
-    catch(e){document.getElementById('bsout').innerHTML=errBox(e.message)}bs.disabled=false;bs.textContent='อัปเดตชีตสรุปใน Google Sheets'};
-  const q=v=>`"${String(v).replace(/"/g,'""')}"`;
-  const exportCsv=(name,lines)=>{
-    const csv='﻿'+lines.map(l=>l.map(q).join(',')).join('\r\n');
-    try{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download=name;document.body.appendChild(a);a.click();a.remove()}catch(e){}
-    document.getElementById('xout').innerHTML=`<div class="card panel" style="margin-top:14px"><div class="sec-h"><h3>${esc(name)}</h3><button class="btn sm ghost" id="cp">คัดลอก</button></div><textarea id="csvt" readonly>${esc(csv.slice(1))}</textarea><small style="color:var(--muted)">ถ้าไฟล์ไม่ดาวน์โหลดเอง คัดลอกไปวางใน Excel / Google Sheets ได้</small></div>`;
-    document.getElementById('cp').onclick=()=>{const t=document.getElementById('csvt');(navigator.clipboard?navigator.clipboard.writeText(t.value):Promise.reject()).then(()=>toast('คัดลอกแล้ว'),()=>{t.select();toast('เลือกข้อความแล้ว กด Ctrl+C')})};
+  ['ls', 'le'].forEach(function (id) { document.getElementById(id).onchange = calc; });
+  calc();
+  document.getElementById('lf2').onsubmit = function (ev) {
+    ev.preventDefault();
+    var btn = ev.target.querySelector('button[type=submit]'); btn.disabled = true;
+    var s = document.getElementById('ls').value;
+    api('leaveCreate', { type: document.getElementById('lt').value, part: part, start: s, end: part === 'full' ? document.getElementById('le').value : s, reason: document.getElementById('lr').value })
+      .then(function () { A.closeModal(); A.toast('ส่งใบลาแล้ว รอแอดมินอนุมัติ'); refresh(); })
+      .catch(function (e) { document.getElementById('lerr2').innerHTML = '<div class="err">' + esc(e.message) + '</div>'; btn.disabled = false; });
   };
-  document.getElementById('xs').onclick=()=>exportCsv(`TESR-attendance-summary-${repMonth}.csv`,[['รหัส','ชื่อ','ตำแหน่ง','วันทำงาน','มา(วัน)','ขาด(วัน)','มาสาย(วัน)','สายรวม(นาที)','ลืมเช็คเอาท์','ชั่วโมงทำงาน']].concat(rows.map(r=>[r.e.code,r.e.name,r.e.pos,r.work,r.present,r.absent,r.lateDays,r.lateMin,r.noOut,r.hours.toFixed(1)])));
-  document.getElementById('xd').onclick=()=>exportCsv(`TESR-attendance-daily-${repMonth}.csv`,[['วันที่','รหัส','ชื่อ','สถานะ','เข้างาน','ออกงาน','สาย(นาที)']].concat(rows.flatMap(r=>r.days.map(x=>[x.date,r.e.code,r.e.name,ST[x.st][1]+(x.off?' (วันหยุด)':''),x.r?.in||'',x.r?.out||'',x.r?x.r.late:'']))));
+}
+function openAdj(date, rec) {
+  A.modal('<div class="sheet-h"><h3>ขอแก้เวลา</h3><button class="x" data-close aria-label="ปิด">×</button></div><form class="sheet-b" id="af">' +
+    '<p class="small muted">ใช้เมื่อลืมเช็คอิน/เช็คเอาท์ หรือสแกนไม่ได้ แอดมินจะตรวจสอบก่อนแก้ให้</p>' +
+    '<div class="field"><label for="ad">วันที่</label><input id="ad" type="date" max="' + ME.today + '" value="' + date + '" required></div>' +
+    '<div class="row"><div class="field"><label for="ai">เวลาเข้าที่ถูกต้อง</label><input id="ai" type="time" value="' + esc(rec && rec.in || '') + '"></div>' +
+    '<div class="field"><label for="ao">เวลาออกที่ถูกต้อง</label><input id="ao" type="time" value="' + esc(rec && rec.out || '') + '"></div></div>' +
+    '<div class="field"><label for="ar">เหตุผล</label><textarea id="ar" required placeholder="เช่น ลืมกดเช็คเอาท์ แบตมือถือหมด"></textarea></div>' +
+    '<div id="aerr"></div><button class="btn primary block" type="submit">ส่งคำขอ</button></form>');
+  document.getElementById('af').onsubmit = function (ev) {
+    ev.preventDefault();
+    var btn = ev.target.querySelector('button[type=submit]'); btn.disabled = true;
+    api('adjCreate', { date: document.getElementById('ad').value, in: document.getElementById('ai').value, out: document.getElementById('ao').value, reason: document.getElementById('ar').value })
+      .then(function () { A.closeModal(); A.toast('ส่งคำขอแก้เวลาแล้ว'); refresh(); })
+      .catch(function (e) { document.getElementById('aerr').innerHTML = '<div class="err">' + esc(e.message) + '</div>'; btn.disabled = false; });
+  };
 }
 
-async function admSet(el){
-  const o=APP.settings,qr=await API.qr();
-  el.innerHTML=`<div class="grid2">
-    <form class="card panel" id="sf"><h3>จุดลงเวลาและกะทำงาน</h3>
-      <div class="field"><label for="s-off">ชื่อสถานที่</label><input id="s-off" value="${esc(o.office)}"></div>
-      <div class="row"><div class="field"><label for="s-lat">Latitude</label><input id="s-lat" type="number" step="0.000001" value="${o.lat}"></div>
-      <div class="field"><label for="s-lng">Longitude</label><input id="s-lng" type="number" step="0.000001" value="${o.lng}"></div></div>
-      <div class="row"><button class="btn ghost sm" type="button" id="here">ใช้ตำแหน่งที่ฉันยืนอยู่ตอนนี้</button><a href="https://www.google.com/maps?q=${o.lat},${o.lng}" target="_blank" rel="noopener" class="link" style="align-self:center;font-size:13px">ดูบน Google Maps ↗</a></div>
-      <div class="row"><div class="field"><label for="s-rad">รัศมีที่อนุญาต (เมตร)</label><input id="s-rad" type="number" min="50" step="50" value="${o.radius}"></div>
-      <div class="field"><label for="s-gr">ผ่อนผันสาย (นาที)</label><input id="s-gr" type="number" min="0" value="${o.grace||0}"></div></div>
-      <div class="row"><div class="field"><label for="s-st">เวลาเข้างาน</label><input id="s-st" type="time" value="${esc(o.start)}"></div>
-      <div class="field"><label for="s-en">เวลาเลิกงาน</label><input id="s-en" type="time" value="${esc(o.end)}"></div></div>
-      <div class="field"><span style="font-size:12.5px;color:var(--muted)">วันทำงาน</span><div class="days">${[1,2,3,4,5,6,0].map(i=>`<label><input type="checkbox" value="${i}" ${o.workdays.includes(i)?'checked':''}> ${TH_D[i]}</label>`).join('')}</div></div>
-      <div class="field"><label for="s-url">URL หน้าเว็บนี้ (GitHub Pages)</label><input id="s-url" type="url" placeholder="https://xxx.github.io/tesr-timeclock/" value="${esc(o.appUrl||'')}"></div>
-      ${REMOTE?'<div class="field"><label for="s-pin">เปลี่ยน PIN แอดมิน (เว้นว่าง = ไม่เปลี่ยน)</label><input id="s-pin" type="password" inputmode="numeric" minlength="4" autocomplete="new-password"></div>':''}
-      <div id="serr"></div>
-      <button class="btn primary" type="submit">บันทึกการตั้งค่า</button>
-    </form>
-    <div class="card panel"><h3>QR Code ประจำวัน</h3>
-      <p style="margin:0;font-size:13.5px;color:var(--muted)">เปิดหน้านี้บนแท็บเล็ตหน้าออฟฟิศ หรือพิมพ์ทุกเช้า · รหัสเปลี่ยนทุกวัน ถ่ายรูปไปใช้วันอื่นไม่ได้ · ต้องอยู่ในรัศมี ${fmtDist(o.radius)}${o.appUrl?' · สแกนด้วยกล้องมือถือปกติก็เปิดหน้าเช็คอินได้เลย':''}</p>
-      <div class="qrbox"><div id="qr"></div></div>
-      <div class="qrmeta">${thDate(qr.date)} · ${esc(qr.token)}</div>
-    </div></div>`;
-  try{new QRCode(document.getElementById('qr'),{text:qr.payload,width:240,height:240,colorDark:'#0d0b0a',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M})}catch(e){document.getElementById('qr').textContent='สร้าง QR ไม่สำเร็จ'}
-  document.getElementById('here').onclick=()=>{if(!navigator.geolocation)return toast('เครื่องนี้ไม่รองรับ GPS');
-    navigator.geolocation.getCurrentPosition(p=>{document.getElementById('s-lat').value=p.coords.latitude.toFixed(6);document.getElementById('s-lng').value=p.coords.longitude.toFixed(6);toast('ใส่พิกัดแล้ว กดบันทึกเพื่อใช้งาน')},()=>toast('ไม่ได้รับสิทธิ์ตำแหน่ง'),{enableHighAccuracy:true,timeout:10000})};
-  document.getElementById('sf').onsubmit=async ev=>{ev.preventDefault();const g=id=>document.getElementById(id).value;
-    const s={office:g('s-off'),lat:+g('s-lat'),lng:+g('s-lng'),radius:+g('s-rad'),grace:+g('s-gr'),start:g('s-st'),end:g('s-en'),appUrl:g('s-url').trim(),
-      workdays:[...el.querySelectorAll('.days input:checked')].map(i=>+i.value).sort().join(',')};
-    const np=REMOTE?g('s-pin'):'';if(np)s.adminPin=np;
-    try{await API.saveSettings(s);if(np){PIN=np;sess.set('tesr-tc-pin',np)}APP=await API.init();admSet(el);toast('บันทึกการตั้งค่าแล้ว')}catch(e){document.getElementById('serr').innerHTML=errBox(e.message)}};
+/* ================= profile ================= */
+function vMe(el) {
+  var e = ME.emp;
+  el.innerHTML = '<div class="card pad stack" style="align-items:center;text-align:center">' +
+    '<label for="ph" style="cursor:pointer">' + A.avatar(e, 'lg') + '</label><input id="ph" type="file" accept="image/*" hidden>' +
+    '<div><h2 style="font-size:20px">' + esc(e.name) + '</h2><div class="muted small">' + esc(e.position || '') + ' · ' + esc(ME.settings.company) + '</div></div>' +
+    '<label for="ph" class="btn ghost sm">เปลี่ยนรูปโปรไฟล์</label></div>' +
+    '<div class="card pad"><dl class="kv"><dt>รหัสพนักงาน</dt><dd class="mono">' + esc(e.code) + '</dd><dt>ชื่อผู้ใช้</dt><dd class="mono">' + esc(ME.username) + '</dd>' +
+    '<dt>อีเมล</dt><dd>' + esc(e.email || '—') + '</dd><dt>เบอร์โทร</dt><dd class="mono">' + esc(e.phone || '—') + '</dd></dl>' +
+    '<p class="small muted" style="margin-top:10px">ข้อมูลไม่ถูกต้อง แจ้งแอดมินเพื่อแก้ไข</p></div>' +
+    '<form class="card pad stack" id="pwf"><h3 style="font-size:16px">เปลี่ยนรหัสผ่าน</h3>' +
+    '<div class="field"><label for="po">รหัสผ่านเดิม</label><input id="po" type="password" autocomplete="current-password" required></div>' +
+    '<div class="row"><div class="field"><label for="pn">รหัสผ่านใหม่</label><input id="pn" type="password" autocomplete="new-password" minlength="6" required></div>' +
+    '<div class="field"><label for="pn2">ยืนยัน</label><input id="pn2" type="password" autocomplete="new-password" minlength="6" required></div></div>' +
+    '<div id="pwe"></div><button class="btn ghost" type="submit">บันทึกรหัสผ่านใหม่</button></form>' +
+    '<button class="btn danger block" id="lo">ออกจากระบบ</button>';
+  document.getElementById('ph').onchange = function (ev) {
+    A.readPhoto(ev.target.files[0], 360, function (url) {
+      api('photo', { data: url }).then(function (r) { ME.emp.photo = A.REMOTE ? r.url + '?v=' + Date.now() : url; A.toast('อัปเดตรูปโปรไฟล์แล้ว'); vMe(el); }).catch(function (e) { A.toast(e.message); });
+    });
+  };
+  document.getElementById('pwf').onsubmit = function (ev) {
+    ev.preventDefault();
+    var n = document.getElementById('pn').value;
+    if (n !== document.getElementById('pn2').value) { document.getElementById('pwe').innerHTML = '<div class="err">รหัสผ่านใหม่ทั้งสองช่องไม่ตรงกัน</div>'; return; }
+    api('changePassword', { old: document.getElementById('po').value, password: n })
+      .then(function (r) { A.store.set(TOKEN, r.token); A.toast('เปลี่ยนรหัสผ่านแล้ว'); ev.target.reset(); document.getElementById('pwe').innerHTML = ''; })
+      .catch(function (e) { document.getElementById('pwe').innerHTML = '<div class="err">' + esc(e.message) + '</div>'; });
+  };
+  document.getElementById('lo').onclick = function () { logout(); };
 }
 
-boot();
+/* ================= punch: 1) QR 2) GPS 3) ยืนยัน ================= */
+function openPunch(kind, presetToken) {
+  var token = presetToken || '', pos = null, stopCam = null, src = 'sim-in', S = ME.settings;
+  var m = A.modal('<div class="viewfinder"><video id="vid" muted playsinline hidden></video><div class="frame"><i></i><i></i><i></i><i></i><div class="laser"></div></div><div class="cap" id="vcap">เล็ง QR Code ที่ติดหน้าออฟฟิศ</div></div>' +
+    '<div class="sheet-b" style="padding-top:14px"><div class="steps"><div class="step" id="sq"><span class="sd"></span><div id="sq-t">รอสแกน QR Code</div></div><div class="step" id="sg"><span class="sd"></span><div id="sg-t">กำลังหาตำแหน่ง…</div></div></div>' +
+    (A.REMOTE ? '' : '<details open><summary class="small muted" style="cursor:pointer">โหมดทดลอง</summary><div class="row" style="margin-top:8px"><div class="field"><label for="src">ตำแหน่งมือถือ</label><select id="src"><option value="sim-in">จำลอง: อยู่ในออฟฟิศ</option><option value="sim-out">จำลอง: นอกพื้นที่ ~3 กม.</option><option value="gps">GPS จริงของเครื่อง</option></select></div></div><button class="btn ghost sm" id="fake" style="margin-top:8px">จำลองการสแกน QR</button></details>') +
+    '<div id="res"></div><div class="row"><button class="btn ghost" id="cl">ยกเลิก</button><button class="btn ' + (kind === 'in' ? 'primary' : 'gold') + '" id="go" disabled>ยืนยัน' + (kind === 'in' ? 'เช็คอิน' : 'เช็คเอาท์') + '</button></div></div>');
+  var $ = function (id) { return document.getElementById(id); };
+  var step = function (id, cls, html) { $(id).className = 'step ' + (cls || ''); $(id + '-t').innerHTML = html; };
+  var ready = function () { $('go').disabled = !(token && pos && pos.dist <= S.radius); };
+  var parse = function (t) { t = String(t || '').trim(); try { var u = new URL(t), v = u.searchParams.get('t'); if (v) return v; } catch (e) {} var p = t.split('|'); return p.length >= 3 ? p[2] : t; };
+  var got = function (t) { token = parse(t); if (stopCam) { stopCam(); stopCam = null; } $('vid').hidden = true; step('sq', 'ok', '<b>อ่าน QR แล้ว</b>'); $('vcap').textContent = 'อ่าน QR สำเร็จ'; ready(); };
+  var show = function () {
+    var d = TC.util.haversine(pos.lat, pos.lng, S.lat, S.lng), ok = d <= S.radius; pos.dist = d;
+    step('sg', ok ? 'ok' : 'bad', '<b>' + (ok ? 'อยู่ในพื้นที่' : 'อยู่นอกพื้นที่') + '</b> · ห่างออฟฟิศ <span class="num">' + TC.util.fmtDist(d) + '</span><br><small>อนุญาตไม่เกิน ' + TC.util.fmtDist(S.radius) + ' · ' + pos.label + '</small>'); ready();
+  };
+  var gps = function () {
+    pos = null; step('sg', '', 'กำลังขอตำแหน่ง GPS…'); ready();
+    if (!navigator.geolocation) return step('sg', 'bad', '<b>เครื่องนี้ไม่รองรับ GPS</b>');
+    navigator.geolocation.getCurrentPosition(function (p) { pos = { lat: p.coords.latitude, lng: p.coords.longitude, label: 'GPS ±' + Math.round(p.coords.accuracy) + ' ม.' }; show(); },
+      function () { step('sg', 'bad', '<b>ไม่ได้รับสิทธิ์ตำแหน่ง</b><br><small>เปิด Location ให้เบราว์เซอร์ แล้วลองใหม่</small>'); }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 });
+  };
+  var locate = function () {
+    if (src === 'sim-in') { pos = { lat: S.lat + 0.0012, lng: S.lng + 0.001, label: 'ตำแหน่งจำลอง' }; show(); }
+    else if (src === 'sim-out') { pos = { lat: S.lat + 0.022, lng: S.lng + 0.02, label: 'ตำแหน่งจำลอง' }; show(); }
+    else gps();
+  };
+  var camera = function () {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.jsQR) { $('vcap').textContent = 'เปิดกล้องไม่ได้ · สแกน QR ด้วยกล้องมือถือแทนได้'; return; }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false }).then(function (stream) {
+      var v = $('vid'); if (!v) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
+      v.srcObject = stream; v.hidden = false; v.play();
+      var c = document.createElement('canvas'), ctx = c.getContext('2d', { willReadFrequently: true }), stop = false;
+      stopCam = function () { stop = true; stream.getTracks().forEach(function (t) { t.stop(); }); };
+      (function tick() {
+        if (stop) return;
+        if (v.readyState >= 2 && v.videoWidth) {
+          var k = Math.min(1, 640 / v.videoWidth); c.width = v.videoWidth * k | 0; c.height = v.videoHeight * k | 0;
+          ctx.drawImage(v, 0, 0, c.width, c.height);
+          var q = jsQR(ctx.getImageData(0, 0, c.width, c.height).data, c.width, c.height, { inversionAttempts: 'dontInvert' });
+          if (q && q.data) return got(q.data);
+        }
+        requestAnimationFrame(tick);
+      })();
+    }).catch(function () { $('vcap').textContent = A.REMOTE ? 'ไม่ได้รับสิทธิ์กล้อง · อนุญาตกล้องแล้วลองใหม่' : 'กล้องใช้ไม่ได้ในหน้านี้ · กด "จำลองการสแกน QR"'; });
+  };
+  m._onclose = function () { if (stopCam) stopCam(); };
+  if (token) got(token); else camera();
+  if (A.REMOTE) gps(); else { locate(); $('src').onchange = function (ev) { src = ev.target.value; locate(); }; $('fake').onclick = function () { got('TESR-ATTEND|x|' + TCMock.qrToken()); }; }
+  $('cl').onclick = A.closeModal;
+  $('go').onclick = function () {
+    var go = $('go'); go.disabled = true; go.textContent = 'กำลังบันทึก…';
+    api('punch', { token2: token, lat: pos.lat, lng: pos.lng }).then(function (res) {
+      var r = res.rec;
+      $('res').innerHTML = res.kind === 'in'
+        ? '<div class="result ' + (r.lateMin ? 'late' : 'ok') + '"><h3 class="num">เช็คอิน ' + esc(r.in) + '</h3>' + (r.lateMin ? 'มาสาย ' + A.fmtLate(r.lateMin) : 'ตรงเวลา ขอให้เป็นวันที่ดี') + '</div>'
+        : '<div class="result ok"><h3 class="num">เช็คเอาท์ ' + esc(r.out) + '</h3>บันทึกเวลาออกงานแล้ว</div>';
+      go.textContent = 'เสร็จสิ้น'; go.disabled = false; go.onclick = function () { A.closeModal(); refresh(); };
+    }).catch(function (e) { $('res').innerHTML = '<div class="result bad"><h3>ลงเวลาไม่สำเร็จ</h3>' + esc(e.message) + '</div>'; go.textContent = 'ลองอีกครั้ง'; ready(); });
+  };
+}
+
+start();
 })();
 </script>
-
 </body>
 </html>
