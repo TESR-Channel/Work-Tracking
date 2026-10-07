@@ -290,16 +290,17 @@ var TC = (function () {
     start: '09:00', end: '18:00', grace: '0', workdays: '1,2,3,4,5', appUrl: '',
     qPersonal: '7', qSick: '30', qVacation: '6', qMaternity: '0',
     adminUser: 'admin', adminHash: '', adminPassword: '',
-    selfie: '1', deviceLock: 'warn', selfieDays: '90'
+    selfie: '1', deviceLock: 'warn', selfieDays: '90',
+    qrMode: 'static', qrVer: '1'
   };
   var DEFAULT_ADMIN_PASSWORD = 'tesr1234';
   var ADJ_WINDOW = 60; // ขอแก้เวลาย้อนหลังได้ไม่เกิน 60 วัน
-  var PUBLIC_SETTINGS = ['company', 'office', 'lat', 'lng', 'radius', 'start', 'end', 'grace', 'workdays', 'appUrl', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'selfie', 'deviceLock', 'selfieDays'];
+  var PUBLIC_SETTINGS = ['company', 'office', 'lat', 'lng', 'radius', 'start', 'end', 'grace', 'workdays', 'appUrl', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'selfie', 'deviceLock', 'selfieDays', 'qrMode'];
   var DEVICE_LOCK = { off: 'ไม่ตรวจ', warn: 'ให้ลงเวลาได้ แต่แจ้งเตือนแอดมิน', block: 'ไม่ให้ลงเวลา' };
   var WRITES = {
     login: 1, register: 1, punch: 1, photo: 1, changePassword: 1, leaveCreate: 1, leaveCancel: 1, adjCreate: 1,
     decide: 1, saveEmp: 1, delEmp: 1, resetLogin: 1, importEmps: 1, saveHoliday: 1, delHoliday: 1,
-    saveSettings: 1, changeAdmin: 1, editRecord: 1, buildMonth: 1, resetDevice: 1
+    saveSettings: 1, changeAdmin: 1, editRecord: 1, buildMonth: 1, resetDevice: 1, rotateQr: 1
   };
 
   /* ---------- small helpers (pure) ---------- */
@@ -384,6 +385,7 @@ var TC = (function () {
     s.selfie = !/^(0|false|off|no)$/i.test(String(s.selfie));
     s.deviceLock = DEVICE_LOCK[s.deviceLock] ? s.deviceLock : 'warn';
     s.selfieDays = Math.max(0, num(s.selfieDays, 90));
+    s.qrMode = s.qrMode === 'daily' ? 'daily' : 'static';
     return s;
   }
   function pubSettings(S) { var o = {}; PUBLIC_SETTINGS.forEach(function (k) { o[k] = S[k]; }); return o; }
@@ -448,7 +450,8 @@ var TC = (function () {
     if (n >= 5) throw E('ลองผิดหลายครั้งเกินไป กรุณารอ 15 นาทีแล้วลองใหม่');
     return function () { c.A.cachePut(key, String(n + 1), 900); };
   }
-  function qrToken(c, date) { return c.A.hmac('qr|' + date).slice(0, 12); }
+  /** QR แบบถาวร (พิมพ์ติดผนัง) เปลี่ยนเมื่อแอดมินกด "สร้าง QR ใหม่" · แบบรายวันเปลี่ยนทุกวัน */
+  function qrToken(c, date) { return c.S.qrMode === 'daily' ? c.A.hmac('qr|' + date).slice(0, 12) : c.A.hmac('qr|static|' + str(c.S.qrVer || '1')).slice(0, 12); }
 
   /* =================== public actions =================== */
   function login(c) {
@@ -502,7 +505,7 @@ var TC = (function () {
   }
   function punch(c) {
     var e = myEmp(c), S = c.S, date = c.now.date, time = c.now.time;
-    if (str(c.p.token2) !== qrToken(c, date)) throw E('QR Code ไม่ถูกต้องหรือหมดอายุ (ใช้ได้เฉพาะ QR ของวันนี้)');
+    if (str(c.p.token2) !== qrToken(c, date)) throw E(c.S.qrMode === 'daily' ? 'QR Code ไม่ถูกต้องหรือหมดอายุ (ใช้ได้เฉพาะ QR ของวันนี้)' : 'QR Code ไม่ถูกต้อง หรือเป็น QR เก่าที่ยกเลิกแล้ว · สแกน QR ที่ติดอยู่ที่ออฟฟิศ');
     var lat = Number(c.p.lat), lng = Number(c.p.lng);
     if (!isFinite(lat) || !isFinite(lng) || (!lat && !lng)) throw E('ไม่ได้รับพิกัด GPS จากมือถือ');
     var dist = Math.round(haversine(lat, lng, S.lat, S.lng));
@@ -781,8 +784,10 @@ var TC = (function () {
   }
   function qr(c) {
     var d = c.now.date, t = qrToken(c, d), base = str(c.S.appUrl).replace(/[?#].*$/, '');
-    return { date: d, token: t, payload: base ? base + '?t=' + t : 'TESR-ATTEND|' + d + '|' + t };
+    return { date: d, token: t, mode: c.S.qrMode, ver: str(c.S.qrVer || '1'), payload: base ? base + '?t=' + t : 'TESR-ATTEND|' + (c.S.qrMode === 'daily' ? d : 'fixed') + '|' + t };
   }
+  /** ยกเลิก QR ที่พิมพ์ไว้ แล้วสร้างชุดใหม่ (ใช้เมื่อ QR หลุดออกไปนอกออฟฟิศ) */
+  function rotateQr(c) { c.A.setSetting('qrVer', String(num(c.S.qrVer, 1) + 1)); c.S = settings(c.A); return qr(c); }
   function editRecord(c) {
     var e = findEmp(c, str(c.p.empId)), date = str(c.p.date), tin = str(c.p.in), tout = str(c.p.out), note = str(c.p.note) || 'แก้ไขโดยแอดมิน';
     if (!isDate(date)) throw E('วันที่ไม่ถูกต้อง');
@@ -907,7 +912,7 @@ var TC = (function () {
   var ADMIN = {
     adminToday: adminToday, adminMonth: adminMonth, requests: requests, decide: decide, employees: employees, saveEmp: saveEmp,
     importEmps: importEmps, delEmp: delEmp, restoreEmp: restoreEmp, resetLogin: resetLogin, resetDevice: resetDevice, selfie: selfie, holidays: listHolidays, saveHoliday: saveHoliday,
-    delHoliday: delHoliday, saveSettings: saveSettings, changeAdmin: changeAdmin, qr: qr, editRecord: editRecord, buildMonth: buildMonth,
+    delHoliday: delHoliday, saveSettings: saveSettings, changeAdmin: changeAdmin, qr: qr, rotateQr: rotateQr, editRecord: editRecord, buildMonth: buildMonth,
     settings: function (c) { return { settings: pubSettings(c.S), adminUser: c.S.adminUser, mustChange: !c.S.adminHash }; }
   };
   function run(A, p) {
