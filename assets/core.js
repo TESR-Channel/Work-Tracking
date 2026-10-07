@@ -19,7 +19,7 @@ var TC = (function () {
     company: 'TESR Co., Ltd.', office: 'TESR Play Ground', lat: '13.8621', lng: '100.5144', radius: '1000',
     start: '09:00', end: '18:00', grace: '0', workdays: '1,2,3,4,5', appUrl: '',
     qPersonal: '7', qSick: '30', qVacation: '6', qMaternity: '0',
-    adminUser: 'admin', adminHash: ''
+    adminUser: 'admin', adminHash: '', adminPassword: ''
   };
   var DEFAULT_ADMIN_PASSWORD = 'tesr1234';
   var PUBLIC_SETTINGS = ['company', 'office', 'lat', 'lng', 'radius', 'start', 'end', 'grace', 'workdays', 'appUrl', 'qPersonal', 'qSick', 'qVacation', 'qMaternity'];
@@ -141,12 +141,14 @@ var TC = (function () {
   }
   function hashPw(A, pw) { var salt = A.uuid(); return salt + '$' + A.sha256(salt + '|' + pw); }
   function checkPw(A, stored, pw) { var s = str(stored), i = s.indexOf('$'); return i > 0 && A.sha256(s.slice(0, i) + '|' + pw) === s.slice(i + 1); }
-  function validUser(u) { if (!/^[a-z0-9._-]{3,30}$/.test(u)) throw E('ชื่อผู้ใช้ต้องเป็น a-z, 0-9, . _ - ยาว 3–30 ตัว'); }
-  function validPw(pw) { if (String(pw).length < 6) throw E('รหัสผ่านต้องยาวอย่างน้อย 6 ตัวอักษร'); }
-  function usernameTaken(c, u, exceptId) {
-    if (u === str(c.S.adminUser).toLowerCase()) return true;
-    return emps(c.A).some(function (e) { return e.id !== exceptId && str(e.username).toLowerCase() === u; });
+  function validUser(u) { if (!/^[a-z0-9._@+-]{3,60}$/.test(u)) throw E('ชื่อผู้ใช้ต้องเป็นอีเมล หรือ a-z, 0-9, . _ - ยาว 3–60 ตัว'); }
+  /** รหัสผ่านพนักงาน: ถ้ายังไม่เคยตั้งเอง ใช้เบอร์โทรที่บันทึกไว้ (ใส่ขีดหรือเว้นวรรคได้) */
+  function empPwOk(A, e, pw) {
+    if (e.passHash) return checkPw(A, e.passHash, pw);
+    var ph = digits(e.phone); return ph.length >= 9 && digits(pw) === ph;
   }
+  function emailOf(e) { return str(e.email).toLowerCase(); }
+  function validPw(pw) { if (String(pw).length < 6) throw E('รหัสผ่านต้องยาวอย่างน้อย 6 ตัวอักษร'); }
   function throttle(c, key) {
     var n = num(c.A.cacheGet(key), 0);
     if (n >= 5) throw E('ลองผิดหลายครั้งเกินไป กรุณารอ 15 นาทีแล้วลองใหม่');
@@ -164,25 +166,11 @@ var TC = (function () {
       if (!ok) { fail(); throw E('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง'); }
       return { role: 'admin', token: sign(c, 'admin', 'admin', ver(c.A, c.S.adminHash), 12), mustChange: !c.S.adminHash, name: c.S.adminUser };
     }
-    var e = emps(c.A).filter(function (x) { return isActive(x) && str(x.username).toLowerCase() === u; })[0];
-    if (!e || !checkPw(c.A, e.passHash, pw)) { fail(); throw E('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง'); }
+    var e = emps(c.A).filter(function (x) { return isActive(x) && emailOf(x) === u; })[0];
+    if (!e || !empPwOk(c.A, e, pw)) { fail(); throw E('อีเมลหรือรหัสผ่านไม่ถูกต้อง'); }
     return { role: 'emp', token: sign(c, 'emp', e.id, ver(c.A, e.passHash), 24 * 60), emp: pubEmp(e) };
   }
 
-  /** ลงทะเบียนครั้งแรก: ยืนยันตัวตนด้วยรหัสพนักงาน + เบอร์โทรที่แอดมินบันทึกไว้ แล้วตั้ง username/password เอง */
-  function register(c) {
-    var code = str(c.p.code).toLowerCase(), u = str(c.p.username).toLowerCase(), pw = String(c.p.password || '');
-    var fail = throttle(c, 'reg:' + code);
-    var e = emps(c.A).filter(function (x) { return isActive(x) && str(x.code).toLowerCase() === code; })[0];
-    if (!e || !digits(e.phone) || digits(e.phone) !== digits(c.p.phone)) { fail(); throw E('รหัสพนักงานหรือเบอร์โทรไม่ตรงกับข้อมูลในระบบ'); }
-    if (e.username) throw E('รหัสพนักงานนี้ตั้งบัญชีแล้ว หากลืมรหัสผ่านให้แจ้งแอดมินรีเซ็ต');
-    validUser(u); validPw(pw);
-    if (usernameTaken(c, u, e.id)) throw E('ชื่อผู้ใช้นี้มีคนใช้แล้ว');
-    var h = hashPw(c.A, pw);
-    c.A.update(TABLES.EMP, e, { username: u, passHash: h });
-    e.passHash = h;
-    return { role: 'emp', token: sign(c, 'emp', e.id, ver(c.A, h), 24 * 60), emp: pubEmp(e) };
-  }
 
   /* =================== employee actions =================== */
   function myEmp(c) { return c.sess.emp; }
@@ -193,7 +181,7 @@ var TC = (function () {
   function me(c) {
     var e = myEmp(c);
     return {
-      emp: pubEmp(e), username: e.username, settings: pubSettings(c.S), today: c.now.date, now: c.now.time,
+      emp: pubEmp(e), username: emailOf(e), customPw: !!e.passHash, settings: pubSettings(c.S), today: c.now.date, now: c.now.time,
       shiftToday: shiftOf(e, c.S, c.now.date), workToday: isWork(c, e, c.now.date), schedule: scheduleText(e, c.S),
       rec: todayRec(c, e.id), usage: usage(c, e, c.now.date.slice(0, 4)),
       pending: c.A.rows(TABLES.LEAVE).filter(function (l) { return l.empId === e.id && l.status === 'pending'; }).length +
@@ -235,7 +223,7 @@ var TC = (function () {
   }
   function changePassword(c) {
     var e = myEmp(c);
-    if (!checkPw(c.A, e.passHash, String(c.p.old || ''))) throw E('รหัสผ่านเดิมไม่ถูกต้อง');
+    if (!empPwOk(c.A, e, String(c.p.old || ''))) throw E('รหัสผ่านเดิมไม่ถูกต้อง');
     validPw(c.p.password);
     var h = hashPw(c.A, String(c.p.password));
     c.A.update(TABLES.EMP, e, { passHash: h });
@@ -377,7 +365,7 @@ var TC = (function () {
     var y = c.now.date.slice(0, 4);
     return emps(c.A).map(function (e) {
       var o = pubEmp(e);
-      o.active = isActive(e); o.username = e.username || ''; o.hasLogin = !!e.passHash;
+      o.active = isActive(e); o.username = emailOf(e); o.customPw = !!e.passHash;
       o.qPersonal = e.qPersonal; o.qSick = e.qSick; o.qVacation = e.qVacation; o.qMaternity = e.qMaternity; o.note = e.note || '';
       o.usage = usage(c, e, y);
       o.schedule = scheduleText(e, c.S); o.custom = customSchedule(e);
@@ -389,6 +377,7 @@ var TC = (function () {
     var o = {};
     EMP_FIELDS.forEach(function (k) { if (src[k] !== undefined) o[k] = str(src[k]); });
     if (o.phone !== undefined) o.phone = digits(o.phone);
+    if (o.email !== undefined) { o.email = o.email.toLowerCase(); if (o.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(o.email)) throw E('อีเมลไม่ถูกต้อง: ' + o.email); }
     if (o.workdays !== undefined) { var wd = parseDays(o.workdays); o.workdays = wd ? wd.join(',') : ''; }
     ['shiftStart', 'shiftEnd', 'satStart', 'satEnd'].forEach(function (k) { if (o[k] === undefined) return; if (/^\d:\d\d$/.test(o[k])) o[k] = '0' + o[k]; if (o[k] && !isTime(o[k])) throw E('เวลางานต้องอยู่ในรูปแบบ HH:MM เช่น 09:20'); });
     if (o.shiftStart && o.shiftEnd && o.shiftEnd <= o.shiftStart) throw E('เวลาเลิกงานต้องหลังเวลาเข้างาน');
@@ -400,6 +389,8 @@ var TC = (function () {
     if (!v.code || !v.name) throw E('ต้องกรอกรหัสพนักงานและชื่อ');
     var dup = list.filter(function (e) { return isActive(e) && e.id !== id && str(e.code).toLowerCase() === v.code.toLowerCase(); })[0];
     if (dup) throw E('รหัสพนักงาน ' + v.code + ' ซ้ำกับ ' + dup.name);
+    if (!v.email) throw E('ต้องกรอกอีเมล (ใช้เป็นชื่อผู้ใช้เข้าระบบ)');
+    checkEmail(c, v.email, id);
     if (id) {
       var e = list.filter(function (x) { return x.id === id; })[0];
       if (!e) throw E('ไม่พบพนักงาน');
@@ -408,11 +399,17 @@ var TC = (function () {
     var n = merge({ id: 'e' + c.A.uuid(), active: 'TRUE', photo: '', username: '', passHash: '' }, v);
     c.A.insert(TABLES.EMP, n); return { id: n.id };
   }
+  function checkEmail(c, em, exceptId) {
+    if (em === str(c.S.adminUser).toLowerCase()) throw E('อีเมล ' + em + ' ซ้ำกับบัญชีแอดมิน');
+    var d = emps(c.A).filter(function (e) { return isActive(e) && e.id !== exceptId && emailOf(e) === em; })[0];
+    if (d) throw E('อีเมล ' + em + ' ซ้ำกับ ' + d.name);
+  }
   function importEmps(c) {
     var rows = c.p.rows || [], added = 0, updated = 0;
     rows.forEach(function (src) {
       var v = cleanEmp(src); if (!v.code || !v.name) return;
       var e = emps(c.A).filter(function (x) { return str(x.code).toLowerCase() === v.code.toLowerCase(); })[0];
+      if (v.email) checkEmail(c, v.email, e ? e.id : '');
       if (e) { c.A.update(TABLES.EMP, e, merge(v, { active: 'TRUE' })); updated++; }
       else { c.A.insert(TABLES.EMP, merge({ id: 'e' + c.A.uuid(), active: 'TRUE', photo: '', username: '', passHash: '' }, v)); added++; }
     });
@@ -421,7 +418,7 @@ var TC = (function () {
   function findEmp(c, id) { var e = emps(c.A).filter(function (x) { return x.id === id; })[0]; if (!e) throw E('ไม่พบพนักงาน'); return e; }
   function delEmp(c) { c.A.update(TABLES.EMP, findEmp(c, str(c.p.id)), { active: 'FALSE' }); return true; }
   function restoreEmp(c) { c.A.update(TABLES.EMP, findEmp(c, str(c.p.id)), { active: 'TRUE' }); return true; }
-  function resetLogin(c) { c.A.update(TABLES.EMP, findEmp(c, str(c.p.id)), { username: '', passHash: '' }); return true; }
+  function resetLogin(c) { c.A.update(TABLES.EMP, findEmp(c, str(c.p.id)), { passHash: '' }); return true; }
   function listHolidays(c) { return holidays(c.A).sort(function (a, b) { return a.date.localeCompare(b.date); }); }
   function saveHoliday(c) {
     var list = c.p.items || [{ date: c.p.date, name: c.p.name }], n = 0;
@@ -451,7 +448,7 @@ var TC = (function () {
     if (!okOld) throw E('รหัสผ่านเดิมไม่ถูกต้อง');
     validUser(u); validPw(pw);
     if (pw === DEFAULT_ADMIN_PASSWORD) throw E('ห้ามใช้รหัสผ่านเริ่มต้น');
-    if (emps(c.A).some(function (e) { return str(e.username).toLowerCase() === u; })) throw E('ชื่อผู้ใช้นี้ซ้ำกับบัญชีพนักงาน');
+    if (emps(c.A).some(function (e) { return isActive(e) && emailOf(e) === u; })) throw E('ชื่อผู้ใช้นี้ซ้ำกับอีเมลของพนักงาน');
     var h = hashPw(c.A, pw);
     c.A.setSetting('adminUser', u); c.A.setSetting('adminHash', h);
     return { token: sign(c, 'admin', 'admin', ver(c.A, h), 12), name: u };
@@ -520,7 +517,7 @@ var TC = (function () {
   }
 
   /* =================== router =================== */
-  var PUBLIC = { login: login, register: register };
+  var PUBLIC = { login: login };
   var EMP = { me: me, myMonth: myMonth, punch: punch, photo: photo, changePassword: changePassword, leaveCreate: leaveCreate, leaveCancel: leaveCancel, adjCreate: adjCreate, myRequests: myRequests };
   var ADMIN = {
     adminToday: adminToday, adminMonth: adminMonth, requests: requests, decide: decide, employees: employees, saveEmp: saveEmp,
@@ -531,6 +528,9 @@ var TC = (function () {
   function run(A, p) {
     var c = { A: A, p: p, now: A.now() };
     c.S = settings(A);
+    // เจ้าของชีตตั้งรหัสแอดมินได้ด้วยการพิมพ์ในชีต Settings แถว adminPassword → ระบบเข้ารหัสแล้วลบข้อความออกเอง
+    var rawPw = str(A.getSettings().adminPassword);
+    if (rawPw) { A.setSetting('adminHash', hashPw(A, rawPw)); A.setSetting('adminPassword', ''); c.S = settings(A); }
     if (PUBLIC[p.action]) return PUBLIC[p.action](c);
     var sess = verify(c, p.token);
     if (!sess) throw E('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่', 'AUTH');
