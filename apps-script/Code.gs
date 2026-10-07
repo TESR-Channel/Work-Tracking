@@ -52,6 +52,7 @@ function nightly() {
   const n = new Date();
   buildSheet_(Utilities.formatDate(n, TZ, 'yyyy-MM'));
   if (Utilities.formatDate(n, TZ, 'd') === '1') buildSheet_(Utilities.formatDate(new Date(n.getFullYear(), n.getMonth() - 1, 1), TZ, 'yyyy-MM'));
+  try { cleanupSelfies_(); } catch (e) { console.error(e); }
 }
 function buildSheet_(m) { return TC_internalBuild_(SheetsAdapter_(), m); }
 function onOpen() {
@@ -132,6 +133,19 @@ function SheetsAdapter_() {
       file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
       return 'https://lh3.googleusercontent.com/d/' + file.getId();
     },
+    /** เซลฟี่ตอนลงเวลา: เก็บแบบส่วนตัว (ไม่แชร์ลิงก์) แอดมินดูผ่าน API เท่านั้น */
+    saveSelfie(emp, date, kind, b64) {
+      const file = selfieFolder_().createFile(Utilities.newBlob(Utilities.base64Decode(b64), 'image/jpeg', date + '_' + emp.code + '_' + kind + '.jpg'));
+      return file.getId();
+    },
+    getSelfie(id) {
+      let f; try { f = DriveApp.getFileById(id); } catch (e) { return ''; }
+      if (f.isTrashed()) return '';
+      const folderId = selfieFolder_().getId(), parents = f.getParents();
+      let inside = false; while (parents.hasNext()) if (parents.next().getId() === folderId) inside = true;
+      if (!inside) return '';
+      return 'data:image/jpeg;base64,' + Utilities.base64Encode(f.getBlob().getBytes());
+    },
     buildMonthSheet: writeMonthSheet_
   };
 }
@@ -176,6 +190,23 @@ function photoFolder_() {
   const f = DriveApp.createFolder('TESR Time Clock · Photos');
   props.setProperty('PHOTO_FOLDER', f.getId());
   return f;
+}
+
+function selfieFolder_() {
+  const props = PropertiesService.getScriptProperties(), id = props.getProperty('SELFIE_FOLDER');
+  if (id) { try { return DriveApp.getFolderById(id); } catch (e) {} }
+  const f = DriveApp.createFolder('TESR Time Clock · Selfies (private)');
+  props.setProperty('SELFIE_FOLDER', f.getId());
+  return f;
+}
+/** ลบเซลฟี่ที่เก่ากว่าจำนวนวันที่ตั้งไว้ (Settings: selfieDays · 0 = เก็บตลอด) */
+function cleanupSelfies_() {
+  const raw = readSettingsRaw_(), days = raw.selfieDays === undefined || raw.selfieDays === '' ? 90 : Number(raw.selfieDays);
+  if (!(days > 0)) return 0;
+  const cut = Date.now() - days * 86400000, it = selfieFolder_().getFiles();
+  let n = 0;
+  while (it.hasNext() && n < 400) { const f = it.next(); if (f.getDateCreated().getTime() < cut) { f.setTrashed(true); n++; } }
+  return n;
 }
 
 /* ===================== ชีตสรุปรายเดือน ===================== */
@@ -244,8 +275,8 @@ function head_(rg) { rg.setFontWeight('bold').setBackground('#8B0000').setFontCo
  * ===================================================================== */
 var TC = (function () {
   var TABLES = {
-    EMP: { name: 'Employees', cols: ['id', 'code', 'name', 'gender', 'email', 'phone', 'position', 'photo', 'active', 'username', 'passHash', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note', 'shiftStart', 'shiftEnd', 'workdays', 'satStart', 'satEnd', 'dayTimes'] },
-    REC: { name: 'Records', cols: ['date', 'empId', 'code', 'name', 'in', 'out', 'lateMin', 'inDist', 'outDist', 'note', 'updatedAt'] },
+    EMP: { name: 'Employees', cols: ['id', 'code', 'name', 'gender', 'email', 'phone', 'position', 'photo', 'active', 'username', 'passHash', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'note', 'shiftStart', 'shiftEnd', 'workdays', 'satStart', 'satEnd', 'dayTimes', 'deviceId', 'deviceAt'] },
+    REC: { name: 'Records', cols: ['date', 'empId', 'code', 'name', 'in', 'out', 'lateMin', 'inDist', 'outDist', 'note', 'updatedAt', 'inPhoto', 'outPhoto', 'flag'] },
     LEAVE: { name: 'Leaves', cols: ['id', 'empId', 'code', 'name', 'type', 'start', 'end', 'part', 'days', 'reason', 'status', 'createdAt', 'decidedAt', 'decidedBy', 'adminNote'] },
     ADJ: { name: 'Adjustments', cols: ['id', 'empId', 'code', 'name', 'date', 'in', 'out', 'reason', 'status', 'createdAt', 'decidedAt', 'decidedBy', 'adminNote'] },
     HOL: { name: 'Holidays', cols: ['date', 'name'] }
@@ -258,15 +289,17 @@ var TC = (function () {
     company: 'TESR Co., Ltd.', office: 'TESR Play Ground', lat: '13.8621', lng: '100.5144', radius: '1000',
     start: '09:00', end: '18:00', grace: '0', workdays: '1,2,3,4,5', appUrl: '',
     qPersonal: '7', qSick: '30', qVacation: '6', qMaternity: '0',
-    adminUser: 'admin', adminHash: '', adminPassword: ''
+    adminUser: 'admin', adminHash: '', adminPassword: '',
+    selfie: '1', deviceLock: 'warn', selfieDays: '90'
   };
   var DEFAULT_ADMIN_PASSWORD = 'tesr1234';
   var ADJ_WINDOW = 60; // ขอแก้เวลาย้อนหลังได้ไม่เกิน 60 วัน
-  var PUBLIC_SETTINGS = ['company', 'office', 'lat', 'lng', 'radius', 'start', 'end', 'grace', 'workdays', 'appUrl', 'qPersonal', 'qSick', 'qVacation', 'qMaternity'];
+  var PUBLIC_SETTINGS = ['company', 'office', 'lat', 'lng', 'radius', 'start', 'end', 'grace', 'workdays', 'appUrl', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'selfie', 'deviceLock', 'selfieDays'];
+  var DEVICE_LOCK = { off: 'ไม่ตรวจ', warn: 'ให้ลงเวลาได้ แต่แจ้งเตือนแอดมิน', block: 'ไม่ให้ลงเวลา' };
   var WRITES = {
     login: 1, register: 1, punch: 1, photo: 1, changePassword: 1, leaveCreate: 1, leaveCancel: 1, adjCreate: 1,
     decide: 1, saveEmp: 1, delEmp: 1, resetLogin: 1, importEmps: 1, saveHoliday: 1, delHoliday: 1,
-    saveSettings: 1, changeAdmin: 1, editRecord: 1, buildMonth: 1
+    saveSettings: 1, changeAdmin: 1, editRecord: 1, buildMonth: 1, resetDevice: 1
   };
 
   /* ---------- small helpers (pure) ---------- */
@@ -348,6 +381,9 @@ var TC = (function () {
     s.lat = num(s.lat, 0); s.lng = num(s.lng, 0); s.radius = num(s.radius, 1000); s.grace = num(s.grace, 0);
     s.workdays = String(s.workdays).split(',').filter(function (x) { return x !== ''; }).map(Number);
     ['qPersonal', 'qSick', 'qVacation', 'qMaternity'].forEach(function (k) { s[k] = num(s[k], 0); });
+    s.selfie = !/^(0|false|off|no)$/i.test(String(s.selfie));
+    s.deviceLock = DEVICE_LOCK[s.deviceLock] ? s.deviceLock : 'warn';
+    s.selfieDays = Math.max(0, num(s.selfieDays, 90));
     return s;
   }
   function pubSettings(S) { var o = {}; PUBLIC_SETTINGS.forEach(function (k) { o[k] = S[k]; }); return o; }
@@ -355,8 +391,8 @@ var TC = (function () {
   /* ---------- data access ---------- */
   function emps(A) { return A.rows(TABLES.EMP); }
   function isActive(e) { return String(e.active).toUpperCase() !== 'FALSE'; }
-  function pubEmp(e) { return { id: e.id, code: e.code, name: e.name, gender: e.gender, position: e.position, photo: e.photo, email: e.email, phone: e.phone, shiftStart: e.shiftStart || '', shiftEnd: e.shiftEnd || '', workdays: e.workdays || '', satStart: e.satStart || '', satEnd: e.satEnd || '', dayTimes: e.dayTimes || '' }; }
-  function recObj(r) { return { date: r.date, empId: r.empId, in: r.in, out: r.out, lateMin: num(r.lateMin, 0), inDist: num(r.inDist, null), outDist: num(r.outDist, null), note: r.note || '' }; }
+  function pubEmp(e) { return { id: e.id, code: e.code, name: e.name, gender: e.gender, position: e.position, photo: e.photo, email: e.email, phone: e.phone, shiftStart: e.shiftStart || '', shiftEnd: e.shiftEnd || '', workdays: e.workdays || '', satStart: e.satStart || '', satEnd: e.satEnd || '', dayTimes: e.dayTimes || '', device: e.deviceId ? (e.deviceAt || 'ลงทะเบียนแล้ว') : '' }; }
+  function recObj(r) { return { date: r.date, empId: r.empId, in: r.in, out: r.out, lateMin: num(r.lateMin, 0), inDist: num(r.inDist, null), outDist: num(r.outDist, null), note: r.note || '', inPhoto: r.inPhoto || '', outPhoto: r.outPhoto || '', flag: r.flag || '' }; }
   function leaveObj(l) { return { id: l.id, empId: l.empId, code: l.code, name: l.name, type: l.type, start: l.start, end: l.end, part: l.part || 'full', days: num(l.days, 0), reason: l.reason, status: l.status, createdAt: l.createdAt, decidedAt: l.decidedAt, adminNote: l.adminNote || '' }; }
   function adjObj(a) { return { id: a.id, empId: a.empId, code: a.code, name: a.name, date: a.date, in: a.in, out: a.out, reason: a.reason, status: a.status, createdAt: a.createdAt, decidedAt: a.decidedAt, adminNote: a.adminNote || '' }; }
   function holidays(A) { return A.rows(TABLES.HOL).filter(function (h) { return isDate(h.date); }).map(function (h) { return { date: h.date, name: h.name }; }); }
@@ -454,6 +490,16 @@ var TC = (function () {
     data.adjustments = c.A.rows(TABLES.ADJ).filter(function (a) { return a.empId === e.id && String(a.date).indexOf(m) === 0; }).map(adjObj);
     return data;
   }
+  /** ตรวจมือถือที่ใช้ลงเวลา: 1 บัญชี = 1 เครื่อง และ 1 เครื่อง = 1 บัญชี (กันฝากเพื่อนลงเวลา) */
+  function checkDevice(c, e) {
+    var S = c.S, dev = str(c.p.dev).replace(/[^A-Za-z0-9-]/g, '').slice(0, 64), block = S.deviceLock === 'block';
+    if (S.deviceLock === 'off') return { flags: [], bind: null };
+    if (dev.length < 12) { if (block) throw E('ไม่พบรหัสเครื่อง · รีเฟรชหน้าแล้วลองใหม่', 'DEVICE'); return { flags: ['ไม่มีรหัสเครื่อง'], bind: null }; }
+    var flags = [], other = emps(c.A).filter(function (x) { return x.id !== e.id && isActive(x) && str(x.deviceId) === dev; })[0];
+    if (other) { if (block) throw E('มือถือเครื่องนี้ลงทะเบียนเป็นของ ' + other.name + ' แล้ว · ลงเวลาแทนคนอื่นไม่ได้', 'DEVICE'); flags.push('ใช้มือถือของ ' + other.name); }
+    if (e.deviceId && e.deviceId !== dev) { if (block) throw E('บัญชีนี้ผูกกับมือถืออีกเครื่องหนึ่ง · ถ้าเปลี่ยนเครื่องหรือเปลี่ยนเบราว์เซอร์ ให้แจ้งแอดมินกด "รีเซ็ตมือถือ"', 'DEVICE'); flags.push('ลงเวลาจากเครื่องอื่น'); }
+    return { flags: flags, bind: !e.deviceId && !other ? dev : null };
+  }
   function punch(c) {
     var e = myEmp(c), S = c.S, date = c.now.date, time = c.now.time;
     if (str(c.p.token2) !== qrToken(c, date)) throw E('QR Code ไม่ถูกต้องหรือหมดอายุ (ใช้ได้เฉพาะ QR ของวันนี้)');
@@ -462,14 +508,23 @@ var TC = (function () {
     var dist = Math.round(haversine(lat, lng, S.lat, S.lng));
     if (dist > S.radius) throw E('อยู่ห่างออฟฟิศ ' + fmtDist(dist) + ' เกินรัศมีที่อนุญาต ' + fmtDist(S.radius));
     var r = c.A.rows(TABLES.REC).filter(function (x) { return x.empId === e.id && x.date === date; })[0];
+    if (r && r.out) throw E('วันนี้ลงเวลาเข้า–ออกครบแล้ว');
+    var kind = r ? 'out' : 'in', sm = str(c.p.selfie).match(/^data:image\/jpeg;base64,([A-Za-z0-9+\/=]+)$/);
+    if (S.selfie && !sm) throw E('กรุณาถ่ายเซลฟี่ยืนยันตัวตนก่อนลงเวลา', 'SELFIE');
+    if (sm && sm[1].length > 400000) throw E('รูปเซลฟี่ใหญ่เกินไป');
+    var dv = checkDevice(c, e);
+    if (dv.bind) c.A.update(TABLES.EMP, e, { deviceId: dv.bind, deviceAt: c.now.iso.slice(0, 10) });
+    var pic = sm ? c.A.saveSelfie(e, date, kind, sm[1], str(c.p.selfie)) : '';
+    var flag = dv.flags.length ? (kind === 'in' ? 'เข้า: ' : 'ออก: ') + dv.flags.join(', ') : '';
     if (r) {
-      if (r.out) throw E('วันนี้ลงเวลาเข้า–ออกครบแล้ว');
-      c.A.update(TABLES.REC, r, { out: time, outDist: String(dist), updatedAt: c.now.iso });
-      return { kind: 'out', rec: recObj(merge(r, { out: time, outDist: dist })) };
+      var patch = { out: time, outDist: String(dist), outPhoto: pic, updatedAt: c.now.iso };
+      if (flag) patch.flag = [str(r.flag), flag].filter(String).join(' · ');
+      c.A.update(TABLES.REC, r, patch);
+      return { kind: 'out', rec: recObj(merge(r, patch)), flag: flag };
     }
-    var rec = merge(stamp(e), { date: date, in: time, out: '', lateMin: String(lateOf(time, shiftOf(e, S, date))), inDist: String(dist), outDist: '', note: '', updatedAt: c.now.iso });
+    var rec = merge(stamp(e), { date: date, in: time, out: '', lateMin: String(lateOf(time, shiftOf(e, S, date))), inDist: String(dist), outDist: '', note: '', updatedAt: c.now.iso, inPhoto: pic, outPhoto: '', flag: flag });
     c.A.insert(TABLES.REC, rec);
-    return { kind: 'in', rec: recObj(rec) };
+    return { kind: 'in', rec: recObj(rec), flag: flag };
   }
   function photo(c) {
     var e = myEmp(c), m = String(c.p.data || '').match(/^data:(image\/\w+);base64,(.+)$/);
@@ -681,6 +736,14 @@ var TC = (function () {
   function findEmp(c, id) { var e = emps(c.A).filter(function (x) { return x.id === id; })[0]; if (!e) throw E('ไม่พบพนักงาน'); return e; }
   function delEmp(c) { c.A.update(TABLES.EMP, findEmp(c, str(c.p.id)), { active: 'FALSE' }); return true; }
   function restoreEmp(c) { c.A.update(TABLES.EMP, findEmp(c, str(c.p.id)), { active: 'TRUE' }); return true; }
+  function resetDevice(c) { c.A.update(TABLES.EMP, findEmp(c, str(c.p.id)), { deviceId: '', deviceAt: '' }); return true; }
+  /** แอดมินดูรูปเซลฟี่: ต้องเป็นรูปที่อ้างอิงอยู่ในชีต Records เท่านั้น */
+  function selfie(c) {
+    var ref = str(c.p.ref);
+    var ok = ref && c.A.rows(TABLES.REC).some(function (r) { return r.inPhoto === ref || r.outPhoto === ref; });
+    if (!ok) throw E('ไม่พบรูป');
+    return { data: c.A.getSelfie(ref) };
+  }
   function resetLogin(c) { c.A.update(TABLES.EMP, findEmp(c, str(c.p.id)), { passHash: '' }); return true; }
   function listHolidays(c) { return holidays(c.A).sort(function (a, b) { return a.date.localeCompare(b.date); }); }
   function saveHoliday(c) {
@@ -754,7 +817,7 @@ var TC = (function () {
         range(l.start, l.end).forEach(function (d) { if (d.indexOf(m) === 0 && (!lby[d] || l.status === 'approved')) lby[d] = l; });
       });
       var wdays = daysOf(e, S);
-      var t = { workdays: 0, present: 0, lateDays: 0, lateMin: 0, earlyDays: 0, earlyMin: 0, absent: 0, noOut: 0, minutes: 0, leaveDays: 0, leaveToDate: 0, leave: {} };
+      var t = { devFlags: 0, workdays: 0, present: 0, lateDays: 0, lateMin: 0, earlyDays: 0, earlyMin: 0, absent: 0, noOut: 0, minutes: 0, leaveDays: 0, leaveToDate: 0, leave: {} };
       Object.keys(LEAVE_TYPES).forEach(function (k) { t.leave[k] = 0; });
       var list = days.map(function (d) {
         var work = wdays.indexOf(dow(d)) >= 0 && !hm[d];
@@ -771,6 +834,7 @@ var TC = (function () {
             early = la && la.part === 'pm' ? 0 : Math.max(0, toMin(sh.end) - toMin(r.out));
             if (early > 0) { t.earlyDays++; t.earlyMin += early; flags.push('early'); }
           } else if (d < today) { t.noOut++; flags.push('noOut'); }
+          if (r.flag) { t.devFlags++; flags.push('device'); }
           st = late > 0 ? 'late' : 'ok';
         } else if (!work) st = hm[d] ? 'holiday' : 'off';
         else if (la && la.part === 'full') st = 'leave';
@@ -783,7 +847,7 @@ var TC = (function () {
       var due = t.workdays - t.leaveToDate;
       t.attendRate = due > 0 ? Math.round(Math.min(1, (due - t.absent) / due) * 100) : null;
       t.onTimeRate = t.present ? Math.round((t.present - t.lateDays) / t.present * 100) : null;
-      t.alerts = t.lateDays + t.earlyDays + t.noOut + (t.absent > 0 ? Math.ceil(t.absent) : 0);
+      t.alerts = t.lateDays + t.earlyDays + t.noOut + t.devFlags + (t.absent > 0 ? Math.ceil(t.absent) : 0);
       return { emp: pubEmp(e), days: list, t: t };
     });
   }
@@ -826,6 +890,7 @@ var TC = (function () {
           notes.push(LEAVE_TYPES[la.type] + (la.part !== 'full' ? ' (' + PART[la.part] + ')' : '') + (la.reason ? ': ' + la.reason : ''));
         } else if (x.leave && x.leave.status === 'pending') notes.push(LEAVE_TYPES[x.leave.type] + ' รออนุมัติ');
         if (rec && rec.note) notes.push(rec.note);
+        if (rec && rec.flag) notes.push('ตรวจสอบมือถือ: ' + rec.flag);
         c[18] = notes.join(' · ');
         rows.push({ cells: c, total: false, flags: x.flags || [], st: x.st, future: x.date > today });
       });
@@ -841,7 +906,7 @@ var TC = (function () {
   var EMP = { me: me, myMonth: myMonth, punch: punch, photo: photo, changePassword: changePassword, leaveCreate: leaveCreate, leaveCancel: leaveCancel, adjCreate: adjCreate, myRequests: myRequests };
   var ADMIN = {
     adminToday: adminToday, adminMonth: adminMonth, requests: requests, decide: decide, employees: employees, saveEmp: saveEmp,
-    importEmps: importEmps, delEmp: delEmp, restoreEmp: restoreEmp, resetLogin: resetLogin, holidays: listHolidays, saveHoliday: saveHoliday,
+    importEmps: importEmps, delEmp: delEmp, restoreEmp: restoreEmp, resetLogin: resetLogin, resetDevice: resetDevice, selfie: selfie, holidays: listHolidays, saveHoliday: saveHoliday,
     delHoliday: delHoliday, saveSettings: saveSettings, changeAdmin: changeAdmin, qr: qr, editRecord: editRecord, buildMonth: buildMonth,
     settings: function (c) { return { settings: pubSettings(c.S), adminUser: c.S.adminUser, mustChange: !c.S.adminHash }; }
   };
