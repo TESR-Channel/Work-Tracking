@@ -65,17 +65,19 @@ function start() {
   }).catch(function (e) { if (e.code !== 'AUTH') showLogin(e.message); });
 }
 function shell() {
-  root.innerHTML = '<div class="adm"><aside class="side"><div class="brand"><span class="logo" role="img" aria-label="TESR"></span><div><b>Time Clock</b><small>Admin console</small></div></div>' +
+  root.innerHTML = '<div class="adm"><aside class="side"><div class="brand"><span class="logo" role="img" aria-label="TESR"></span><div><b>Time Clock</b><small>Admin console</small></div><button class="mlo" id="lo2" type="button">ออกจากระบบ</button></div>' +
     '<nav aria-label="เมนูแอดมิน">' + NAV.map(function (n) { return '<button data-p="' + n[0] + '">' + A.ICON[n[2]] + '<span>' + n[1] + '</span>' + (n[0] === 'req' ? '<span class="cnt" id="reqCnt" hidden></span>' : '') + '</button>'; }).join('') + '</nav>' +
     '<div class="foot"><span>เข้าสู่ระบบเป็น <b style="color:var(--gold)">' + esc(INFO.adminUser) + '</b></span><button id="lo">ออกจากระบบ</button><a href="index.html" style="color:var(--ink-muted)">หน้าพนักงาน ↗</a></div></aside>' +
     '<main class="main" id="main"></main></div>';
   root.querySelectorAll('[data-p]').forEach(function (b) { b.onclick = function () { go(b.dataset.p); }; });
   document.getElementById('lo').onclick = function () { logout(); };
+  var lo2 = document.getElementById('lo2'); if (lo2) lo2.onclick = document.getElementById('lo').onclick;
 }
 function setCount(n) { pendingN = n; var c = document.getElementById('reqCnt'); if (c) { c.hidden = !n; c.textContent = n; } }
 function go(p, keep) {
   page = p; try { history.replaceState(null, '', '#' + p); } catch (e) {}
   root.querySelectorAll('[data-p]').forEach(function (b) { if (b.dataset.p === p) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+  var cur = root.querySelector('.side nav [aria-current="page"]'); if (cur && window.innerWidth <= 860) try { cur.scrollIntoView({ inline: 'center', block: 'nearest' }); } catch (e) {}
   var el = document.getElementById('main');
   if (!keep) el.innerHTML = '<div class="loading">กำลังโหลด…</div>';
   var banner = INFO.mustChange ? '<div class="warn-banner"><span>ยังใช้รหัสผ่านแอดมินเริ่มต้นอยู่ กรุณาเปลี่ยนก่อนใช้งานจริง</span><button class="btn gold sm" id="toSet">เปลี่ยนรหัสผ่าน</button></div>' : '';
@@ -190,7 +192,7 @@ function pReq(el, banner) {
           (it.k === 'leave' && x.status === 'approved' ? '<div class="acts"><button class="btn ghost sm" data-dec="rejected" data-k="leave" data-id="' + esc(x.id) + '">เพิกถอนการอนุมัติ</button></div>' : '');
       return '<div class="req">' + who + body + '<div class="reason">' + esc(x.reason) + '</div>' + acts + '</div>';
     };
-    el.innerHTML = banner + head('คำขออนุมัติ', 'ใบลาและคำขอแก้เวลาจากพนักงาน ทุกการพิจารณาถูกบันทึกในชีต Leaves / Adjustments เป็นหลักฐาน',
+    el.innerHTML = banner + head('คำขออนุมัติ', 'ใบลาและคำขอแก้เวลาจากพนักงาน ทุกการพิจารณาถูกบันทึกพร้อมเวลาและผู้อนุมัติ เก็บเป็นหลักฐาน',
       '<div class="hrow"><div class="seg" id="f1"><button data-v="pending" aria-pressed="' + (st.reqFilter === 'pending') + '">รออนุมัติ</button><button data-v="all" aria-pressed="' + (st.reqFilter === 'all') + '">ทั้งหมด</button></div>' +
       '<div class="seg" id="f2"><button data-v="all" aria-pressed="' + (st.reqKind === 'all') + '">ทุกประเภท</button><button data-v="leave" aria-pressed="' + (st.reqKind === 'leave') + '">ใบลา</button><button data-v="adj" aria-pressed="' + (st.reqKind === 'adj') + '">แก้เวลา</button></div></div>') +
       '<div class="card">' + (items.map(card).join('') || '<div class="empty">' + (st.reqFilter === 'pending' ? 'ไม่มีคำขอรออนุมัติ' : 'ยังไม่มีคำขอ') + '</div>') + '</div>';
