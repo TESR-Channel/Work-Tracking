@@ -9,6 +9,16 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
 <link rel="stylesheet" href="assets/styles.css">
+<style>
+/* ตารางสรุปรายบุคคล + รวมทั้งทีม */
+.sec-h{font-size:16px;margin:18px 0 8px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.sec-h small{font-size:12.5px;font-weight:400}
+.sumtbl th.grp{border-bottom:1px solid var(--line);text-align:center}
+.sumtbl th{vertical-align:bottom}
+.sumtbl .wv{color:var(--warn)} .sumtbl .bv{color:var(--bad)} .sumtbl .lv{color:var(--leave)}
+.sumtbl tfoot td{border-top:2px solid var(--gold);background:var(--gold-soft);font-weight:700;color:var(--fg)}
+.sumtbl tfoot .muted{color:var(--fg);opacity:.6}
+</style>
 </head>
 <body>
 <div id="app"><div class="loading">กำลังโหลด…</div></div>
@@ -294,6 +304,7 @@ function monthlyReport(d) {
   }).join('');
   A.modal('<div class="sheet-h"><h3>รายงานประจำเดือน ' + A.thMonth(d.month) + '</h3><div class="hrow"><button class="btn gold sm" id="xlsx">ดาวน์โหลด Excel</button><button class="x" data-close aria-label="ปิด">×</button></div></div>' +
     '<div class="sheet-b"><p class="small muted">รูปแบบเดียวกับรายงาน Export AllSum เดิม · ชม.งาน = เวลางานมาตรฐานหักพักเที่ยง 1 ชม. ลบสาย/กลับก่อน · ขาดงาน = สาย + กลับก่อน หรือเต็มวันเมื่อไม่มา/ลืมบันทึก · แถวสีเหลืองคือยอดรวมของแต่ละคน</p>' +
+    '<h4 class="sec-h">ชีต 1 · สรุปรายบุคคล + รวมทั้งทีม</h4>' + summaryHtml(d.report) + '<h4 class="sec-h">ชีต 2 · รายวันทุกคน</h4>' +
     '<div class="card tbl-wrap report-x" style="max-height:65vh"><table><thead>' + th1 + '</thead><tbody>' + body + '</tbody></table></div><div id="xerr"></div></div>', 'xl');
   document.getElementById('xlsx').onclick = function () { downloadXlsx(d, t); };
 }
@@ -301,7 +312,27 @@ function loadScript(src) { return new Promise(function (ok, no) { if (window.Exc
 function downloadXlsx(d, t) {
   var b = document.getElementById('xlsx'); b.disabled = true; b.textContent = 'กำลังสร้างไฟล์…';
   loadScript('https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js').then(function () {
-    var wb = new ExcelJS.Workbook(), ws = wb.addWorksheet('Export ' + d.month, { views: [{ state: 'frozen', xSplit: 2, ySplit: 2 }] });
+    var wb = new ExcelJS.Workbook();
+    /* ชีต 1: สรุปรายบุคคล + รวมทั้งทีม */
+    var S = teamSummary(d.report), nc = S.cols.length, ws0 = wb.addWorksheet('สรุปรายบุคคล', { views: [{ state: 'frozen', xSplit: 2, ySplit: 3 }] });
+    ws0.addRow(['สรุปการทำงานรายบุคคล เดือน' + A.thMonth(d.month) + ' · ' + (d.settings.company || '')]); ws0.mergeCells(1, 1, 1, nc);
+    ws0.addRow(['นับถึง ' + A.thDate(d.today, 'year') + ' · สาย/กลับก่อนเทียบกับเวลางานของแต่ละคนในแต่ละวัน · ลาครึ่งวันที่อนุมัติแล้วไม่นับสาย/กลับก่อนในช่วงที่ลา']); ws0.mergeCells(2, 1, 2, nc);
+    ws0.getRow(1).font = { bold: true, size: 14, name: 'Tahoma' }; ws0.getRow(2).font = { size: 10, name: 'Tahoma', color: { argb: 'FF666666' } };
+    var hr = ws0.addRow(S.cols.map(function (c) { return c[1]; }));
+    hr.eachCell(function (c) { c.font = { bold: true, color: { argb: 'FFFFFFFF' }, name: 'Tahoma', size: 10 }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8B0000' } }; c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; });
+    hr.height = 34;
+    S.rows.concat([S.total]).forEach(function (r, i) {
+      var isT = r === S.total, row = ws0.addRow(S.cols.map(function (c) { var v = r[c[0]]; return v === '' || v === undefined ? '' : v; }));
+      row.eachCell({ includeEmpty: true }, function (c, ci) {
+        c.font = { name: 'Tahoma', size: 10, bold: isT }; if (ci > 3) c.alignment = { horizontal: 'center' };
+        if (isT) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFDD0' } };
+        else if ((ci === 6 || ci === 7 || ci === 8) && r.lateDays) c.font = { name: 'Tahoma', size: 10, color: { argb: 'FFB45309' } };
+        else if ((ci === 11 || ci === 12) && (r.absent || r.noOut)) c.font = { name: 'Tahoma', size: 10, color: { argb: 'FFB91C1C' } };
+      });
+    });
+    [10, 24, 14, 9, 10, 9, 10, 11, 10, 11, 10, 11, 8, 8, 9, 8, 9, 9, 9, 9].forEach(function (w, i) { ws0.getColumn(i + 1).width = w; });
+    /* ชีต 2: รายวันทุกคน (รูปแบบ Export AllSum เดิม) */
+    var ws = wb.addWorksheet('รายวัน ' + d.month, { views: [{ state: 'frozen', xSplit: 2, ySplit: 2 }] });
     ws.addRow(t.head1); ws.addRow(t.head2);
     t.merges.forEach(function (g) { ws.mergeCells(g[0] + 1, g[1] + 1, g[2] + 1, g[3] + 1); });
     [1, 2].forEach(function (n) { ws.getRow(n).eachCell({ includeEmpty: true }, function (c) { c.font = { bold: true, color: { argb: 'FFFFFFFF' }, name: 'Tahoma' }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8B0000' } }; c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; }); });
@@ -323,6 +354,48 @@ function downloadXlsx(d, t) {
     .then(function () { b.disabled = false; b.textContent = 'ดาวน์โหลด Excel'; });
 }
 
+/* ================= สรุปรายบุคคล + รวมทั้งทีม (ใช้ทั้งหน้ารายงาน, Excel และ CSV) ================= */
+function hm2(m) { m = Math.round(m || 0); return m ? Math.floor(m / 60) + ':' + A.pad(m % 60) : '0:00'; }
+var SUM_COLS = [['code', 'รหัส'], ['name', 'ชื่อ'], ['position', 'ตำแหน่ง'], ['workdays', 'วันทำงาน'], ['present', 'มาทำงาน (วัน)'],
+  ['lateDays', 'มาสาย (วัน)'], ['lateMin', 'สายรวม (นาที)'], ['lateHm', 'สายรวม (ชม.:นาที)'], ['earlyDays', 'กลับก่อน (วัน)'], ['earlyMin', 'กลับก่อนรวม (นาที)'],
+  ['absent', 'ขาดงาน (วัน)'], ['noOut', 'ลืมเช็คเอาท์ (วัน)'], ['personal', 'ลากิจ (วัน)'], ['sick', 'ลาป่วย (วัน)'], ['vacation', 'ลาพักร้อน (วัน)'], ['other', 'ลาอื่นๆ (วัน)'],
+  ['leaveDays', 'ลารวม (วัน)'], ['hours', 'ชม.ในออฟฟิศ'], ['onTime', 'ตรงเวลา (%)'], ['attend', 'มาทำงาน (%)']];
+function teamSummary(rep) {
+  var rows = rep.map(function (r) {
+    var t = r.t, L = t.leave || {};
+    return { id: r.emp.id, emp: r.emp, t: t, code: r.emp.code, name: r.emp.name, position: r.emp.position || '', workdays: t.workdays, present: t.present,
+      lateDays: t.lateDays, lateMin: t.lateMin, lateHm: hm2(t.lateMin), earlyDays: t.earlyDays, earlyMin: t.earlyMin, absent: t.absent, noOut: t.noOut,
+      personal: L.personal || 0, sick: L.sick || 0, vacation: L.vacation || 0, other: (L.maternity || 0) + (L.unpaid || 0), leaveDays: t.leaveDays,
+      hours: Math.round(t.hours * 10) / 10, onTime: t.onTimeRate === null ? '' : t.onTimeRate, attend: t.attendRate === null ? '' : t.attendRate };
+  });
+  var T = { code: '', name: 'รวมทั้งทีม (' + rows.length + ' คน)', position: '' }, sum = function (k) { return rows.reduce(function (a, r) { return a + (+r[k] || 0); }, 0); };
+  ['workdays', 'present', 'lateDays', 'lateMin', 'earlyDays', 'earlyMin', 'absent', 'noOut', 'personal', 'sick', 'vacation', 'other', 'leaveDays'].forEach(function (k) { T[k] = Math.round(sum(k) * 10) / 10; });
+  T.lateHm = hm2(T.lateMin); T.hours = Math.round(rep.reduce(function (a, r) { return a + r.t.hours; }, 0) * 10) / 10;
+  T.onTime = T.present ? Math.round((T.present - T.lateDays) / T.present * 100) : '';
+  var due = rep.reduce(function (a, r) { return a + r.t.workdays - r.t.leaveToDate; }, 0);
+  T.attend = due > 0 ? Math.round(Math.min(1, (due - T.absent) / due) * 100) : '';
+  return { cols: SUM_COLS, rows: rows, total: T };
+}
+function summaryHtml(rep) {
+  var S = teamSummary(rep), n = function (v, cls) { return v ? '<b class="' + (cls || '') + '">' + v + '</b>' : '<span class="muted">0</span>'; };
+  var cells = function (r, isT) {
+    return '<td class="r num">' + r.workdays + '</td><td class="r num">' + r.present + '</td>' +
+      '<td class="r num">' + n(r.lateDays, 'wv') + '</td><td class="r num">' + (r.lateMin ? '<b class="wv">' + r.lateMin + '</b> <span class="muted small">(' + r.lateHm + ')</span>' : '<span class="muted">0</span>') + '</td>' +
+      '<td class="r num">' + n(r.earlyDays, 'wv') + '</td><td class="r num">' + n(r.earlyMin, 'wv') + '</td>' +
+      '<td class="r num">' + n(A.fmtDays(r.absent) === '0' ? 0 : A.fmtDays(r.absent), 'bv') + '</td><td class="r num">' + n(r.noOut, 'bv') + '</td>' +
+      '<td class="r num">' + n(r.personal) + '</td><td class="r num">' + n(r.sick) + '</td><td class="r num">' + n(r.vacation) + '</td><td class="r num">' + n(r.other) + '</td>' +
+      '<td class="r num">' + n(r.leaveDays, 'lv') + '</td><td class="r num">' + r.hours.toFixed(1) + '</td>' +
+      '<td class="c">' + (r.onTime === '' ? '–' : pct(r.onTime)) + '</td><td class="c">' + (r.attend === '' ? '–' : pct(r.attend)) + '</td>';
+  };
+  return '<div class="card tbl-wrap sumtbl"><table><thead><tr><th rowspan="2">พนักงาน</th><th rowspan="2">แจ้งเตือน</th><th class="r" rowspan="2">วันทำงาน</th><th class="r" rowspan="2">มา</th>' +
+    '<th class="c grp" colspan="2">มาสาย</th><th class="c grp" colspan="2">กลับก่อน</th><th class="r" rowspan="2">ขาด<br>(วัน)</th><th class="r" rowspan="2">ลืม<br>เช็คเอาท์</th>' +
+    '<th class="c grp" colspan="5">ลา (วัน)</th><th class="r" rowspan="2">ชม.</th><th class="c" rowspan="2">ตรงเวลา</th><th class="c" rowspan="2">มาทำงาน</th></tr>' +
+    '<tr><th class="r">วัน</th><th class="r">นาที</th><th class="r">วัน</th><th class="r">นาที</th><th class="r">กิจ</th><th class="r">ป่วย</th><th class="r">พักร้อน</th><th class="r">อื่นๆ</th><th class="r">รวม</th></tr></thead><tbody>' +
+    (S.rows.map(function (r) {
+      return '<tr class="click' + (r.id === st.selEmp ? ' sel' : '') + '" data-emp="' + r.id + '"><td>' + A.person(r.emp) + '</td><td style="white-space:normal;min-width:140px">' + sumChips(r.t) + '</td>' + cells(r) + '</tr>';
+    }).join('') || '<tr><td colspan="18" class="empty">ไม่มีข้อมูลเดือนนี้</td></tr>') +
+    '</tbody>' + (S.rows.length ? '<tfoot><tr class="tot"><td colspan="2"><b>' + esc(S.total.name) + '</b></td>' + cells(S.total, true) + '</tr></tfoot>' : '') + '</table></div>';
+}
 function pReport(el, banner) {
   return api('adminMonth', { month: st.month }).then(function (d) {
     var rep = d.report;
@@ -335,25 +408,14 @@ function pReport(el, banner) {
     el.innerHTML = banner + head('รายงานรายเดือน', 'สำหรับทำเงินเดือนและ KPI · นับถึงวันนี้ · สาย/ออกก่อนเทียบกับเวลางานของแต่ละคนในแต่ละวัน · ลาครึ่งวันที่อนุมัติแล้วไม่นับสาย/ออกก่อนในช่วงที่ลา',
       '<div class="toolbar">' + A.monthPicker('rmp', st.month) +
       (A.REMOTE && !SUPA ? '<button class="btn primary sm" id="bs">อัปเดตชีตสรุปใน Google Sheets</button>' : '') +
-      '<button class="btn gold sm" id="xx">รายงานประจำเดือน (Excel)</button><button class="btn ghost sm" id="xs">สรุป KPI (CSV)</button><button class="btn ghost sm" id="xd">รายวัน (CSV)</button></div>') +
+      '<button class="btn gold sm" id="xx">รายงานประจำเดือน (Excel)</button><button class="btn ghost sm" id="xs">สรุปรายบุคคล (CSV)</button><button class="btn ghost sm" id="xd">รายวัน (CSV)</button></div>') +
       '<div id="bsout"></div>' +
       '<div class="kpis num"><div class="card kpi k-req"><span>รายการต้องตรวจสอบ</span><b>' + tot.alerts + small('รายการ') + '</b></div>' +
       '<div class="card kpi k-late"><span>สายรวมทั้งทีม</span><b>' + tot.lateMin + small('นาที') + '</b></div>' +
       '<div class="card kpi k-late"><span>ออกก่อนเวลารวม</span><b>' + tot.early + small('นาที') + '</b></div>' +
       '<div class="card kpi k-bad"><span>ขาดงานรวม</span><b>' + A.fmtDays(tot.absent) + small('วัน') + '</b></div>' +
       '<div class="card kpi k-leave"><span>ลารวม (อนุมัติแล้ว)</span><b>' + A.fmtDays(tot.leave) + small('วัน') + '</b></div></div>' +
-      '<div class="card tbl-wrap"><table><thead><tr><th>พนักงาน</th><th>แจ้งเตือน</th><th class="r">วันทำงาน</th><th class="r">มา</th><th class="r">ขาด</th><th class="r">สาย</th><th class="r">ออกก่อน</th><th class="r">ลืมเช็คเอาท์</th><th>ลา (วัน)</th><th class="r">ชม.</th><th class="c">ตรงเวลา</th><th class="c">มาทำงาน</th></tr></thead><tbody>' +
-      (rep.map(function (r) {
-        var t = r.t;
-        return '<tr class="click' + (r.emp.id === st.selEmp ? ' sel' : '') + '" data-emp="' + r.emp.id + '"><td>' + A.person(r.emp) + '</td><td style="white-space:normal;min-width:150px">' + sumChips(t) + '</td>' +
-          '<td class="r num">' + t.workdays + '</td><td class="r num">' + t.present + '</td>' +
-          '<td class="r num" style="color:' + (t.absent ? 'var(--bad)' : 'inherit') + '">' + A.fmtDays(t.absent) + '</td>' +
-          '<td class="r num">' + (t.lateDays ? '<b style="color:var(--warn)">' + t.lateDays + '</b> <span class="muted small">/ ' + t.lateMin + ' น.</span>' : '<span class="muted">0</span>') + '</td>' +
-          '<td class="r num">' + (t.earlyDays ? '<b style="color:var(--warn)">' + t.earlyDays + '</b> <span class="muted small">/ ' + t.earlyMin + ' น.</span>' : '<span class="muted">0</span>') + '</td>' +
-          '<td class="r num" style="color:' + (t.noOut ? 'var(--bad)' : 'inherit') + '">' + t.noOut + '</td>' +
-          '<td class="small">' + (t.leaveDays ? '<b>' + A.fmtDays(t.leaveDays) + '</b> <span class="muted">' + esc(leaveBrief(t)) + '</span>' : '<span class="muted">–</span>') + '</td>' +
-          '<td class="r num">' + t.hours.toFixed(1) + '</td><td class="c">' + pct(t.onTimeRate) + '</td><td class="c">' + pct(t.attendRate) + '</td></tr>';
-      }).join('') || '<tr><td colspan="12" class="empty">ไม่มีข้อมูลเดือนนี้</td></tr>') + '</tbody></table></div>' +
+      '<h3 class="sec-h">สรุปรายบุคคล · รวมทั้งทีม <small class="muted">กดที่ชื่อเพื่อดูรายวัน</small></h3>' + summaryHtml(rep) +
       '<p class="small muted">ตรงเวลา = วันที่ไม่สาย ÷ วันที่มา · มาทำงาน = วันทำงานที่ไม่ขาด ÷ (วันทำงาน − วันลาที่อนุมัติ) · ใช้เป็นตัวชี้วัด KPI ได้</p>' +
       (sel ? '<div class="card"><div class="panel-h"><div>' + A.person(sel.emp, sel.emp.code + ' · ' + TC.util.scheduleText(sel.emp, d.settings)) + '</div>' +
         '<label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="oa"' + (st.onlyAlerts ? ' checked' : '') + '> เฉพาะวันที่มีแจ้งเตือน</label></div>' +
@@ -390,8 +452,8 @@ function pReport(el, banner) {
     var FL = { late: 'สาย', early: 'ออกก่อนเวลา', noOut: 'ลืมเช็คเอาท์', absent: 'ขาด', device: 'ตรวจสอบมือถือ' };
     document.getElementById('xx').onclick = function () { monthlyReport(d); };
     document.getElementById('xs').onclick = function () {
-      show('TESR-summary-' + st.month + '.csv', A.csv([['รหัส', 'ชื่อ', 'ตำแหน่ง', 'เวลางาน', 'วันทำงาน', 'มาทำงาน', 'ขาด(วัน)', 'มาสาย(ครั้ง)', 'สายรวม(นาที)', 'ออกก่อน(ครั้ง)', 'ออกก่อนรวม(นาที)', 'ลืมเช็คเอาท์'].concat(LT().map(function (t) { return TC.LEAVE_TYPES[t] + '(วัน)'; })).concat(['ชั่วโมงในออฟฟิศ', 'ตรงเวลา(%)', 'มาทำงาน(%)', 'รายการแจ้งเตือน'])]
-        .concat(rep.map(function (r) { var t = r.t; return [r.emp.code, r.emp.name, r.emp.position, TC.util.scheduleText(r.emp, d.settings), t.workdays, t.present, t.absent, t.lateDays, t.lateMin, t.earlyDays, t.earlyMin, t.noOut].concat(LT().map(function (k) { return t.leave[k]; })).concat([t.hours, t.onTimeRate === null ? '' : t.onTimeRate, t.attendRate === null ? '' : t.attendRate, t.alerts]); }))));
+      var S = teamSummary(rep), row = function (r) { return S.cols.map(function (c) { return r[c[0]]; }); };
+      show('TESR-สรุปรายบุคคล-' + st.month + '.csv', A.csv([S.cols.map(function (c) { return c[1]; })].concat(S.rows.map(row)).concat([row(S.total)])));
     };
     document.getElementById('xd').onclick = function () {
       var lines = [['วันที่', 'รหัส', 'ชื่อ', 'เวลางาน', 'สถานะ', 'เข้างาน', 'ออกงาน', 'สาย(นาที)', 'ออกก่อน(นาที)', 'แจ้งเตือน', 'การลา', 'หมายเหตุ']];
