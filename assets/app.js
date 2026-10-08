@@ -202,6 +202,7 @@ var APP = (function () {
       a.download = name; document.body.appendChild(a); a.click(); a.remove();
     } catch (e) {}
   }
+
   /* เสียงแจ้งผล (WebAudio ไม่ต้องโหลดไฟล์) · iOS ต้องเรียก unlock() ระหว่างที่ผู้ใช้แตะหน้าจอ */
   var sound = (function () {
     var ctx = null;
