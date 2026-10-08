@@ -349,7 +349,7 @@ var TC = (function () {
   var DEFAULT_ADMIN_PASSWORD = 'tesr1234';
   var ADJ_WINDOW = 60; // ขอแก้เวลาย้อนหลังได้ไม่เกิน 60 วัน
   var PUBLIC_SETTINGS = ['company', 'office', 'lat', 'lng', 'radius', 'start', 'end', 'grace', 'workdays', 'appUrl', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'selfie', 'deviceLock', 'selfieDays', 'qrMode', 'startDate'];
-  var ADMIN_SETTINGS = ['driveFolder']; // แอดมินเห็น/แก้ได้ แต่ไม่ส่งให้พนักงาน
+  var ADMIN_SETTINGS = ['driveFolder', 'qrFixed']; // แอดมินเห็น/แก้ได้ แต่ไม่ส่งให้พนักงาน
   var DEVICE_LOCK = { off: 'ไม่ตรวจ', warn: 'ให้ลงเวลาได้ แต่แจ้งเตือนแอดมิน', block: 'ไม่ให้ลงเวลา' };
   var WRITES = {
     login: 1, register: 1, punch: 1, photo: 1, changePassword: 1, leaveCreate: 1, leaveCancel: 1, adjCreate: 1,
