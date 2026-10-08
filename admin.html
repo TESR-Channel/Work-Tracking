@@ -21,6 +21,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 (function () {
+var SUPA = window.TESR_BACKEND === 'supabase'; // ฐานข้อมูล Supabase (ไม่ใช่ Google Sheet)
 var A = APP, esc = A.esc, TOKEN = 'tesr-tc-admin';
 var api = A.makeApi(TOKEN, function () { logout('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่'); });
 var root = document.getElementById('app');
@@ -331,7 +332,7 @@ function pReport(el, banner) {
     var days = sel ? sel.days.filter(function (x) { return x.date <= d.today && x.st !== 'pre' && (x.work || x.rec || x.leave); }).filter(function (x) { return !st.onlyAlerts || x.flags.length; }) : [];
     el.innerHTML = banner + head('รายงานรายเดือน', 'สำหรับทำเงินเดือนและ KPI · นับถึงวันนี้ · สาย/ออกก่อนเทียบกับเวลางานของแต่ละคนในแต่ละวัน · ลาครึ่งวันที่อนุมัติแล้วไม่นับสาย/ออกก่อนในช่วงที่ลา',
       '<div class="toolbar">' + A.monthPicker('rmp', st.month) +
-      (A.REMOTE ? '<button class="btn primary sm" id="bs">อัปเดตชีตสรุปใน Google Sheets</button>' : '') +
+      (A.REMOTE && !SUPA ? '<button class="btn primary sm" id="bs">อัปเดตชีตสรุปใน Google Sheets</button>' : '') +
       '<button class="btn gold sm" id="xx">รายงานประจำเดือน (Excel)</button><button class="btn ghost sm" id="xs">สรุป KPI (CSV)</button><button class="btn ghost sm" id="xd">รายวัน (CSV)</button></div>') +
       '<div id="bsout"></div>' +
       '<div class="kpis num"><div class="card kpi k-req"><span>รายการต้องตรวจสอบ</span><b>' + tot.alerts + small('รายการ') + '</b></div>' +
@@ -640,12 +641,12 @@ function pSet(el, banner) {
       '<label class="hrow small" style="gap:8px"><input type="checkbox" id="sx1"' + (o.selfie !== false ? ' checked' : '') + '> บังคับถ่ายเซลฟี่ด้วยกล้องหน้าทุกครั้งที่ลงเวลา (เลือกรูปจากอัลบั้มไม่ได้)</label>' +
       '<div class="row"><div class="field"><label for="sx2">ล็อกมือถือ (1 บัญชี = 1 เครื่อง)</label><select id="sx2">' + [['off', 'ปิด · ไม่ตรวจมือถือ'], ['warn', 'แจ้งเตือน · ลงเวลาได้ แต่ขึ้นแจ้งเตือนในรายงาน'], ['block', 'บล็อก · ลงเวลาจากเครื่องอื่นไม่ได้']].map(function (x) { return '<option value="' + x[0] + '"' + (o.deviceLock === x[0] ? ' selected' : '') + '>' + x[1] + '</option>'; }).join('') + '</select></div>' +
       f('sx3', 'เก็บรูปเซลฟี่ (วัน · 0 = เก็บตลอด)', o.selfieDays, 'type="number" min="0"') + '</div>' +
-      '<p class="small muted">เซลฟี่เก็บใน Google Drive ของเจ้าของชีตแบบไม่แชร์ลิงก์ ดูได้เฉพาะแอดมิน และลบอัตโนมัติเมื่อครบกำหนด · ควรแจ้งพนักงานก่อนเปิดใช้ (PDPA)</p>' +
+      '<p class="small muted">' + (SUPA ? 'เซลฟี่เก็บในพื้นที่ส่วนตัวของ Supabase (ไม่มีลิงก์สาธารณะ)' : 'เซลฟี่เก็บใน Google Drive ของเจ้าของชีตแบบไม่แชร์ลิงก์') + ' ดูได้เฉพาะแอดมิน และลบอัตโนมัติเมื่อครบกำหนด · ควรแจ้งพนักงานก่อนเปิดใช้ (PDPA)</p>' +
       '<h3 style="font-size:16px;margin-top:6px">การเก็บข้อมูล</h3>' +
       '<div class="row">' + f('sd1', 'วันเริ่มใช้ระบบ (ก่อนวันนี้ไม่นับขาด)', o.startDate, 'type="date"') + '</div>' +
       '<p class="small muted" style="margin-top:-6px">' + (o.startDate ? 'ตั้งไว้แล้ว' : 'ยังไม่ได้ตั้ง · ตอนนี้ใช้วันแรกที่มีคนลงเวลา: ' + (INFO.goLive ? A.thDate(INFO.goLive, 'year') : '—')) + '</p>' +
-      f('sd2', 'โฟลเดอร์ Google Drive สำหรับเก็บรูป (วางลิงก์โฟลเดอร์)', (INFO.admin && INFO.admin.driveFolder) || '', 'placeholder="https://drive.google.com/drive/folders/..."') +
-      '<p class="small muted" style="margin-top:-6px">ระบบจะสร้างโฟลเดอร์ "รูปโปรไฟล์" และ "เซลฟี่ลงเวลา" ไว้ข้างใน · เว้นว่าง = สร้างโฟลเดอร์ใหม่ใน Drive ของเจ้าของชีต</p>' +
+      (SUPA ? '<input type="hidden" id="sd2" value="">' : f('sd2', 'โฟลเดอร์ Google Drive สำหรับเก็บรูป (วางลิงก์โฟลเดอร์)', (INFO.admin && INFO.admin.driveFolder) || '', 'placeholder="https://drive.google.com/drive/folders/..."') +
+      '<p class="small muted" style="margin-top:-6px">ระบบจะสร้างโฟลเดอร์ "รูปโปรไฟล์" และ "เซลฟี่ลงเวลา" ไว้ข้างใน · เว้นว่าง = สร้างโฟลเดอร์ใหม่ใน Drive ของเจ้าของชีต</p>') +
       '<div class="field"><label for="sx4">รูปแบบ QR Code</label><select id="sx4"><option value="static"' + (o.qrMode !== 'daily' ? ' selected' : '') + '>ถาวร · พิมพ์ติดผนังครั้งเดียว (แนะนำ)</option><option value="daily"' + (o.qrMode === 'daily' ? ' selected' : '') + '>เปลี่ยนทุกวัน · ต้องเปิดบนจอหรือพิมพ์ใหม่ทุกวัน</option></select></div>' +
       f('s9', 'URL หน้าพนักงาน (ใช้ทำ QR ให้สแกนด้วยกล้องมือถือได้เลย)', o.appUrl, 'type="url" placeholder="https://tesr-channel.github.io/Work-Tracking/"') +
       '<div id="serr"></div><button class="btn primary" type="submit">บันทึกการตั้งค่า</button></form>' +
@@ -654,6 +655,7 @@ function pSet(el, banner) {
       (o.appUrl ? '' : '<div class="note" style="color:var(--bad)">ยังไม่ได้ใส่ "URL หน้าพนักงาน" · ใส่และบันทึกก่อนพิมพ์ เพื่อให้สแกนด้วยกล้องมือถือได้ทันที</div>') +
       '<div class="qrbox"><div id="qr"></div></div><div class="small muted mono" style="text-align:center">' + (fixedQr ? 'ชุดที่ ' + esc(qr.ver) : A.thDate(qr.date, 'year')) + ' · ' + esc(qr.token) + '</div>' +
       '<div class="row"><button class="btn gold" id="prt" type="button">พิมพ์ QR ติดผนัง</button><button class="btn ghost" id="full" type="button">แสดงเต็มจอ</button></div>' +
+      (fixedQr ? '<details class="small"><summary style="cursor:pointer">ใช้ QR แผ่นเดิมที่ติดผนังอยู่แล้ว (ไม่ต้องพิมพ์ใหม่)</summary><p class="muted" style="margin:8px 0">ใช้กล้องมือถือสแกน QR แผ่นเดิม แล้วคัดลอกลิงก์ที่ได้ (…?t=xxxx) มาวางที่นี่</p><div class="hrow" style="gap:8px"><input id="qfx" placeholder="https://tesr-channel.github.io/Work-Tracking/?t=…" style="flex:1"><button class="btn ghost sm" id="qfxb" type="button">ใช้รหัสนี้</button></div></details>' : '') +
       (fixedQr ? '<button class="btn ghost sm" id="rot" type="button">สร้าง QR ชุดใหม่ (QR ที่พิมพ์ไว้จะใช้ไม่ได้)</button>' : '') + '</div>' +
       '<form class="card pad stack" id="af"><h3 style="font-size:16px">บัญชีแอดมิน</h3>' + f('a1', 'อีเมล / ชื่อผู้ใช้แอดมิน', INFO.adminUser, 'autocomplete="username" autocapitalize="none" required') +
       f('a2', 'รหัสผ่านปัจจุบัน', '', 'type="password" autocomplete="current-password" required') + '<div class="row">' + f('a3', 'รหัสผ่านใหม่', '', 'type="password" autocomplete="new-password" minlength="6" required') + f('a4', 'ยืนยัน', '', 'type="password" autocomplete="new-password" minlength="6" required') + '</div>' +
@@ -672,6 +674,11 @@ function pSet(el, banner) {
       var done = function () { document.body.classList.remove('printing'); box.remove(); window.removeEventListener('afterprint', done); };
       window.addEventListener('afterprint', done);
       setTimeout(function () { window.print(); setTimeout(function () { if (document.getElementById('printqr')) done(); }, 1500); }, 300);
+    };
+    var qfxb = document.getElementById('qfxb'); if (qfxb) qfxb.onclick = function () {
+      var v = document.getElementById('qfx').value.trim(), m = v.match(/[?&]t=([A-Za-z0-9]+)/) || v.match(/\|([A-Za-z0-9]{6,40})$/) || v.match(/^([A-Za-z0-9]{6,40})$/);
+      if (!m) return A.toast('ไม่พบรหัสในลิงก์ · วางลิงก์ที่ได้จากการสแกน QR เดิม');
+      qfxb.disabled = true; api('saveSettings', { settings: { qrFixed: m[1] } }).then(function () { A.toast('ใช้ QR แผ่นเดิมแล้ว · ไม่ต้องพิมพ์ใหม่'); go('set'); }).catch(function (e) { qfxb.disabled = false; A.toast(e.message); });
     };
     var rot = document.getElementById('rot'); if (rot) rot.onclick = function () {
       if (!rot.dataset.armed) { rot.dataset.armed = 1; rot.textContent = 'ยืนยัน: ยกเลิก QR เดิมและสร้างชุดใหม่'; rot.className = 'btn danger sm'; return; }
