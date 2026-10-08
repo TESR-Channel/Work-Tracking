@@ -31,7 +31,7 @@ var TC = (function () {
   var DEFAULT_ADMIN_PASSWORD = 'tesr1234';
   var ADJ_WINDOW = 60; // ขอแก้เวลาย้อนหลังได้ไม่เกิน 60 วัน
   var PUBLIC_SETTINGS = ['company', 'office', 'lat', 'lng', 'radius', 'start', 'end', 'grace', 'workdays', 'appUrl', 'qPersonal', 'qSick', 'qVacation', 'qMaternity', 'selfie', 'deviceLock', 'selfieDays', 'qrMode', 'startDate'];
-  var ADMIN_SETTINGS = ['driveFolder']; // แอดมินเห็น/แก้ได้ แต่ไม่ส่งให้พนักงาน
+  var ADMIN_SETTINGS = ['driveFolder', 'qrFixed']; // แอดมินเห็น/แก้ได้ แต่ไม่ส่งให้พนักงาน
   var DEVICE_LOCK = { off: 'ไม่ตรวจ', warn: 'ให้ลงเวลาได้ แต่แจ้งเตือนแอดมิน', block: 'ไม่ให้ลงเวลา' };
   var WRITES = {
     login: 1, register: 1, punch: 1, photo: 1, changePassword: 1, leaveCreate: 1, leaveCancel: 1, adjCreate: 1,
@@ -869,8 +869,9 @@ Deno.serve(async (req: Request) => {
     // บันทึกเสมอ (รวมถึงตอนล็อกอินผิด เพื่อนับครั้งที่ผิด) · ถ้าบันทึกไม่สำเร็จ แจ้งเป็น error
     if (dirty()) await flush();
     if (res.ok && p.action === 'selfie' && res.data && typeof res.data.data === 'string' && res.data.data.indexOf('__SIGN__') === 0) {
-      const { data, error } = await sb.storage.from('selfies').createSignedUrl(res.data.data.slice(8), 3600);
-      res.data.data = error ? '' : data.signedUrl;
+      const ref = res.data.data.slice(8);
+      if (ref.indexOf('drive:') === 0) res.data.data = 'https://drive.google.com/thumbnail?sz=w800&id=' + encodeURIComponent(ref.slice(6)); // รูปเก่าจากช่วงที่ใช้ Google Drive (ดูได้เมื่อล็อกอิน Google บัญชีเจ้าของ)
+      else { const { data, error } = await sb.storage.from('selfies').createSignedUrl(ref, 3600); res.data.data = error ? '' : data.signedUrl; }
     }
     if (res.ok && p.action === 'sync' && res.data && res.data.role === 'admin') {
       const S = A.getSettings(), key = 'cleanup:' + nowBkk().date;
