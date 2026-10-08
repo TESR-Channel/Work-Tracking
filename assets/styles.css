@@ -374,3 +374,18 @@ td.num,td.mono,td.r{white-space:nowrap}
 .legend.tags span{display:flex;align-items:center;gap:8px}
 .legend.tags .tg{min-width:44px;text-align:center;font-size:11.5px;padding:4px 6px}
 @media (min-width:520px){.legend.tags{grid-template-columns:repeat(4,minmax(0,1fr))}}
+/* แอดมินบนมือถือ: แถบเมนูแนวนอนเตี้ยๆ ไม่ยืดเต็มจอ */
+.side .brand .mlo{display:none}
+@media (max-width:860px){
+  .adm{grid-template-rows:auto 1fr;align-content:start}
+  .side{height:auto!important;min-height:0}
+  .side .brand{gap:10px}
+  .side .brand .logo{width:38px;height:38px}
+  .side .brand .mlo{display:inline-block;margin-left:auto;border:1px solid var(--ink-line);background:none;color:#cfc4b6;border-radius:8px;padding:6px 10px;font-size:12.5px}
+  .side nav{flex:none;align-items:center;gap:6px;padding:6px 12px 10px;scrollbar-width:none}
+  .side nav::-webkit-scrollbar{display:none}
+  .side nav button{flex:none;height:38px;padding:0 12px;border-radius:999px;background:var(--ink-2);font-size:13.5px}
+  .side nav button svg{width:16px;height:16px}
+  .side nav button[aria-current="page"]{background:var(--gold);color:var(--ink);box-shadow:none}
+  .side nav button[aria-current="page"] svg{opacity:1}
+}
