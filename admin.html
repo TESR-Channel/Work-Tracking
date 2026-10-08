@@ -19,6 +19,20 @@
 .sumtbl .wv{color:var(--warn)} .sumtbl .bv{color:var(--bad)} .sumtbl .lv{color:var(--leave)}
 .sumtbl tfoot td{border-top:2px solid var(--gold);background:var(--gold-soft);font-weight:700;color:var(--fg)}
 .sumtbl tfoot .muted{color:var(--fg);opacity:.6}
+.rbar{display:flex;flex-direction:column;gap:12px;padding:14px;margin-bottom:14px}
+.rbar .rp{align-self:flex-start;max-width:100%;overflow-x:auto}
+.rbar #bsout:empty,.rbar #xerr:empty{display:none}
+.rrow{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.rrow.between{justify-content:space-between;align-items:center}
+.rf{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted);flex:0 1 170px}
+.rf.grow{flex:1 1 220px}
+.rf input,.rf select{height:40px;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:10px;padding:0 10px;font:inherit;font-size:15px;font-weight:600;width:100%}
+.rlabel{margin:4px 0 10px;font-size:15px}
+.kpi em{display:block;font-style:normal;font-size:12px;color:var(--muted);margin-top:2px}
+.xl-sheet{max-height:72vh}
+.xl-sheet tr.tot td{font-weight:700;border-top:1px solid #c9b46a}
+.xl-sheet .dw{display:inline-block;min-width:22px;color:#8a7f72;font-size:11px}
+@media (max-width:860px){.rf{flex:1 1 140px}.rrow.between{flex-direction:column;align-items:stretch}.rbar .seg{overflow-x:auto}}
 </style>
 </head>
 <body>
@@ -66,7 +80,7 @@ A.onFresh(function () {
 });
 
 /* ================= shell ================= */
-var NAV = [['today', 'ภาพรวมวันนี้', 'gauge'], ['req', 'คำขออนุมัติ', 'inbox'], ['cal', 'ปฏิทินทีม', 'cal'], ['report', 'รายงานรายเดือน', 'chart'], ['emps', 'พนักงาน', 'people'], ['hol', 'วันหยุดบริษัท', 'star'], ['set', 'ตั้งค่า & QR Code', 'gear']];
+var NAV = [['today', 'ภาพรวมวันนี้', 'gauge'], ['req', 'คำขออนุมัติ', 'inbox'], ['cal', 'ปฏิทินทีม', 'cal'], ['report', 'รายงาน', 'chart'], ['emps', 'พนักงาน', 'people'], ['hol', 'วันหยุดบริษัท', 'star'], ['set', 'ตั้งค่า & QR Code', 'gear']];
 function start() {
   if (!A.store.get(TOKEN)) return showLogin();
   api('settings').then(function (d) {
@@ -127,7 +141,7 @@ function openSelfies(k) {
   A.modal('<div class="sheet-h"><h3>' + esc(e.name) + ' · ' + A.thDate(r.date, 'year') + '</h3><button class="x" data-close aria-label="ปิด">×</button></div><div class="sheet-b stack">' +
     '<div class="selfie-pair" style="grid-template-columns:repeat(' + figs.length + ',1fr)">' + figs.map(function (f) { return '<figure id="' + f[0] + '">' + f[2] + '<figcaption>' + f[1] + '</figcaption></figure>'; }).join('') + '</div>' +
     (r.flag ? '<div class="note" style="color:var(--bad)">ตรวจสอบมือถือ: ' + esc(r.flag) + '</div>' : '') +
-    '<p class="small muted">เทียบหน้าในเซลฟี่กับรูปโปรไฟล์ ถ้าไม่ใช่คนเดียวกัน แก้เวลาได้ที่รายงานรายเดือนพร้อมใส่หมายเหตุ</p></div>', 'wide');
+    '<p class="small muted">เทียบหน้าในเซลฟี่กับรูปโปรไฟล์ ถ้าไม่ใช่คนเดียวกัน แก้เวลาได้ที่รายงานพร้อมใส่หมายเหตุ</p></div>', 'wide');
   [['fi', r.inPhoto], ['fo', r.outPhoto]].forEach(function (p) {
     if (!p[1]) return;
     getSelfie(p[1]).then(function (url) { var f = document.querySelector('#' + p[0] + ' .ph'); if (f) f.outerHTML = url ? '<img src="' + url + '" alt="">' : '<div class="ph">รูปถูกลบแล้ว (เกินระยะเวลาเก็บ)</div>'; });
@@ -287,28 +301,6 @@ function sumChips(t) {
 }
 function leaveBrief(t) { return LT().filter(function (k) { return t.leave[k]; }).map(function (k) { return TC.LEAVE_TYPES[k].replace('ลา', '') + ' ' + A.fmtDays(t.leave[k]); }).join(' · '); }
 /* ---------- รายงานประจำเดือนแบบละเอียด (หน้าตาเหมือนไฟล์ Export AllSum เดิม) ---------- */
-function exportData(d) { return TC.exportTable(d.month, d.report, Object.assign({}, d.settings), d.today); }
-function rowBg(r) { return r.total ? 'FFFFFDD0' : r.st === 'absent' || (r.flags || []).indexOf('noOut') >= 0 ? 'FFFBE1DF' : (r.flags || []).length ? 'FFFBEAD6' : r.st === 'leave' ? 'FFE3ECFB' : (r.st === 'off' || r.st === 'holiday') ? 'FFF3F0EC' : null; }
-function monthlyReport(d) {
-  var t = exportData(d), cols = t.head1.length;
-  var th1 = '', skip = {};
-  t.merges.forEach(function (g) { for (var rr = g[0]; rr <= g[2]; rr++) for (var cc = g[1]; cc <= g[3]; cc++) if (rr !== g[0] || cc !== g[1]) skip[rr + ',' + cc] = 1; });
-  var cell = function (rr, cc, txt) {
-    if (skip[rr + ',' + cc]) return '';
-    var g = t.merges.filter(function (x) { return x[0] === rr && x[1] === cc; })[0];
-    return '<th' + (g ? ' rowspan="' + (g[2] - g[0] + 1) + '" colspan="' + (g[3] - g[1] + 1) + '"' : '') + '>' + esc(txt) + '</th>';
-  };
-  th1 = '<tr>' + t.head1.map(function (x, i) { return cell(0, i, x); }).join('') + '</tr><tr>' + t.head2.map(function (x, i) { return cell(1, i, x); }).join('') + '</tr>';
-  var body = t.rows.map(function (r) {
-    var bg = rowBg(r);
-    return '<tr' + (bg ? ' style="background:#' + bg.slice(2) + ';color:#17130f' + (r.total ? ';font-weight:700' : '') + '"' : '') + '>' + r.cells.map(function (c, i) { return '<td' + (i >= 2 && i < cols - 1 ? ' class="c num"' : '') + '>' + esc(c) + '</td>'; }).join('') + '</tr>';
-  }).join('');
-  A.modal('<div class="sheet-h"><h3>รายงานประจำเดือน ' + A.thMonth(d.month) + '</h3><div class="hrow"><button class="btn gold sm" id="xlsx">ดาวน์โหลด Excel</button><button class="x" data-close aria-label="ปิด">×</button></div></div>' +
-    '<div class="sheet-b"><p class="small muted">รูปแบบเดียวกับรายงาน Export AllSum เดิม · ชม.งาน = เวลางานมาตรฐานหักพักเที่ยง 1 ชม. ลบสาย/กลับก่อน · ขาดงาน = สาย + กลับก่อน หรือเต็มวันเมื่อไม่มา/ลืมบันทึก · แถวสีเหลืองคือยอดรวมของแต่ละคน</p>' +
-    '<h4 class="sec-h">ชีต 1 · สรุปรายบุคคล + รวมทั้งทีม</h4>' + summaryHtml(d.report) + '<h4 class="sec-h">ชีต 2 · รายวันทุกคน</h4>' +
-    '<div class="card tbl-wrap report-x" style="max-height:65vh"><table><thead>' + th1 + '</thead><tbody>' + body + '</tbody></table></div><div id="xerr"></div></div>', 'xl');
-  document.getElementById('xlsx').onclick = function () { downloadXlsx(d, t); };
-}
 function loadScript(src) { return new Promise(function (ok, no) { if (window.ExcelJS) return ok(); var s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = no; document.head.appendChild(s); }); }
 function downloadXlsx(d, t) {
   var b = document.getElementById('xlsx'); b.disabled = true; b.textContent = 'กำลังสร้างไฟล์…';
@@ -316,7 +308,7 @@ function downloadXlsx(d, t) {
     var wb = new ExcelJS.Workbook();
     /* ชีต 1: สรุปรายบุคคล + รวมทั้งทีม */
     var S = teamSummary(d.report), nc = S.cols.length, ws0 = wb.addWorksheet('สรุปรายบุคคล', { views: [{ state: 'frozen', xSplit: 2, ySplit: 3 }] });
-    ws0.addRow(['สรุปการทำงานรายบุคคล เดือน' + A.thMonth(d.month) + ' · ' + (d.settings.company || '')]); ws0.mergeCells(1, 1, 1, nc);
+    ws0.addRow(['สรุปการทำงานรายบุคคล ' + d.label + ' · ' + (d.settings.company || '')]); ws0.mergeCells(1, 1, 1, nc);
     ws0.addRow(['นับถึง ' + A.thDate(d.today, 'year') + ' · สาย/กลับก่อนเทียบกับเวลางานของแต่ละคนในแต่ละวัน · ลาครึ่งวันที่อนุมัติแล้วไม่นับสาย/กลับก่อนในช่วงที่ลา']); ws0.mergeCells(2, 1, 2, nc);
     ws0.getRow(1).font = { bold: true, size: 14, name: 'Tahoma' }; ws0.getRow(2).font = { size: 10, name: 'Tahoma', color: { argb: 'FF666666' } };
     var hr = ws0.addRow(S.cols.map(function (c) { return c[1]; }));
@@ -333,7 +325,7 @@ function downloadXlsx(d, t) {
     });
     [10, 24, 14, 9, 10, 9, 10, 11, 10, 11, 10, 11, 8, 8, 9, 8, 9, 9, 9, 9].forEach(function (w, i) { ws0.getColumn(i + 1).width = w; });
     /* ชีต 2: รายวันทุกคน (รูปแบบ Export AllSum เดิม) */
-    var ws = wb.addWorksheet('รายวัน ' + d.month, { views: [{ state: 'frozen', xSplit: 2, ySplit: 2 }] });
+    var ws = wb.addWorksheet('รายวัน', { views: [{ state: 'frozen', xSplit: 2, ySplit: 2 }] });
     ws.addRow(t.head1); ws.addRow(t.head2);
     t.merges.forEach(function (g) { ws.mergeCells(g[0] + 1, g[1] + 1, g[2] + 1, g[3] + 1); });
     [1, 2].forEach(function (n) { ws.getRow(n).eachCell({ includeEmpty: true }, function (c) { c.font = { bold: true, color: { argb: 'FFFFFFFF' }, name: 'Tahoma' }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8B0000' } }; c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; }); });
@@ -349,9 +341,9 @@ function downloadXlsx(d, t) {
     return wb.xlsx.writeBuffer();
   }).then(function (buf) {
     var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-    a.download = 'TESR-รายงานประจำเดือน-' + d.month + '.xlsx'; document.body.appendChild(a); a.click(); a.remove();
+    a.download = 'TESR-รายงาน-' + d.tag + '.xlsx'; document.body.appendChild(a); a.click(); a.remove();
     A.toast('ดาวน์โหลดไฟล์ Excel แล้ว');
-  }).catch(function () { err('xerr', 'สร้างไฟล์ Excel ไม่สำเร็จ (โหลดตัวสร้างไฟล์ไม่ได้) ลองใช้ปุ่ม "รายวัน (CSV)" แทน'); })
+  }).catch(function () { err('xerr', 'สร้างไฟล์ Excel ไม่สำเร็จ (โหลดตัวสร้างไฟล์ไม่ได้) ลองใหม่อีกครั้ง'); })
     .then(function () { b.disabled = false; b.textContent = 'ดาวน์โหลด Excel'; });
 }
 
@@ -395,30 +387,143 @@ function summaryHtml(rep) {
     (S.rows.map(function (r) {
       return '<tr class="click' + (r.id === st.selEmp ? ' sel' : '') + '" data-emp="' + r.id + '"><td>' + A.person(r.emp) + '</td><td style="white-space:normal;min-width:140px">' + sumChips(r.t) + '</td>' + cells(r) + '</tr>';
     }).join('') || '<tr><td colspan="18" class="empty">ไม่มีข้อมูลเดือนนี้</td></tr>') +
-    '</tbody>' + (S.rows.length ? '<tfoot><tr class="tot"><td colspan="2"><b>' + esc(S.total.name) + '</b></td>' + cells(S.total, true) + '</tr></tfoot>' : '') + '</table></div>';
+    '</tbody>' + (S.rows.length > 1 ? '<tfoot><tr class="tot"><td colspan="2"><b>' + esc(S.total.name) + '</b></td>' + cells(S.total, true) + '</tr></tfoot>' : '') + '</table></div>';
+}
+/* ================= รายงาน: เลือกช่วงวันที่ + พนักงาน · ดูออนไลน์ได้ทันที (แบบตาราง Export AllSum) ================= */
+var TH_DOW = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
+function mins(s) { var p = String(s || '').split(':'); return (+p[0] || 0) * 60 + (+p[1] || 0); }
+function stdMin(sh) { var span = mins(sh.end) - mins(sh.start); return Math.max(0, span >= 360 ? span - 60 : span); }
+function hmm(m) { m = Math.round(m || 0); return m > 0 ? Math.floor(m / 60) + ':' + A.pad(m % 60) : ' - '; }
+function dmy(s) { return s.slice(8) + '/' + s.slice(5, 7) + '/' + s.slice(0, 4); }
+function addD(s, n) { var p = s.split('-'), d = new Date(+p[0], +p[1] - 1, +p[2] + n); return A.ymd(d); }
+function monthEnd(m) { var p = m.split('-'); return A.ymd(new Date(+p[0], +p[1], 0)); }
+function monthsBetween(a, b) { var out = [], m = a.slice(0, 7); while (m <= b.slice(0, 7) && out.length < 14) { out.push(m); m = A.addMonth(m, 1); } return out; }
+function rangePresets(today) {
+  var m = today.slice(0, 7), pm = A.addMonth(m, -1);
+  return [['m', 'เดือนนี้', m + '-01', monthEnd(m)], ['pm', 'เดือนที่แล้ว', pm + '-01', monthEnd(pm)], ['7', '7 วันล่าสุด', addD(today, -6), today],
+    ['30', '30 วันล่าสุด', addD(today, -29), today], ['y', 'ปีนี้', today.slice(0, 4) + '-01-01', today.slice(0, 4) + '-12-31']];
+}
+function rangeLabel(a, b) { return A.thDate(a, 'year') + ' – ' + A.thDate(b, 'year'); }
+/** ยอดรวมของช่วงวันที่เลือก (คิดแบบเดียวกับรายงานรายเดือน) */
+function rangeT(days, today) {
+  var t = { devFlags: 0, workdays: 0, present: 0, lateDays: 0, lateMin: 0, earlyDays: 0, earlyMin: 0, absent: 0, noOut: 0, minutes: 0, leaveDays: 0, leaveToDate: 0, leave: {} };
+  Object.keys(TC.LEAVE_TYPES).forEach(function (k) { t.leave[k] = 0; });
+  days.forEach(function (x) {
+    var r = x.rec, la = x.leave && x.leave.status === 'approved' ? x.leave : null;
+    if (la && x.work) { var amt = la.part === 'full' ? 1 : 0.5; t.leave[la.type] = (t.leave[la.type] || 0) + amt; t.leaveDays += amt; if (x.date <= today) t.leaveToDate += amt; }
+    if (x.work && x.date <= today && x.st !== 'pre') t.workdays++;
+    if (r) {
+      t.present++;
+      if (x.late > 0) { t.lateDays++; t.lateMin += x.late; }
+      if (x.early > 0) { t.earlyDays++; t.earlyMin += x.early; }
+      if (r.out) t.minutes += Math.max(0, mins(r.out) - mins(r.in));
+      if ((x.flags || []).indexOf('noOut') >= 0) t.noOut++;
+      if (r.flag) t.devFlags++;
+    } else if (x.st === 'absent') t.absent += la ? 0.5 : 1;
+  });
+  t.hours = Math.round(t.minutes / 6) / 10;
+  var due = t.workdays - t.leaveToDate;
+  t.attendRate = due > 0 ? Math.round(Math.min(1, (due - t.absent) / due) * 100) : null;
+  t.onTimeRate = t.present ? Math.round((t.present - t.lateDays) / t.present * 100) : null;
+  t.alerts = t.lateDays + t.earlyDays + t.noOut + t.devFlags + (t.absent > 0 ? Math.ceil(t.absent) : 0);
+  return t;
+}
+/** รวมข้อมูลหลายเดือน แล้วตัดเฉพาะช่วงวันที่เลือก */
+function rangeData(from, to) {
+  return Promise.all(monthsBetween(from, to).map(function (m) { return api('adminMonth', { month: m }); })).then(function (ds) {
+    var last = ds[ds.length - 1], by = {}, order = [];
+    ds.forEach(function (d) {
+      d.report.forEach(function (r) {
+        if (!by[r.emp.id]) { by[r.emp.id] = { emp: r.emp, days: [] }; order.push(r.emp.id); }
+        by[r.emp.id].emp = r.emp;
+        r.days.forEach(function (x) { if (x.date >= from && x.date <= to) by[r.emp.id].days.push(x); });
+      });
+    });
+    var rep = order.map(function (id) { var r = by[id]; r.t = rangeT(r.days, last.today); return r; });
+    return { report: rep, settings: last.settings, today: last.today };
+  });
+}
+/** ตารางรายวันแบบไฟล์ Export AllSum เดิม (ใช้ทั้งหน้าเว็บและไฟล์ Excel) */
+function sheetTable(rep, S, today) {
+  var H = TC.exportTable('2000-01', [], S, today), rows = [], LV = ['personal', 'sick', 'vacation', 'other'];
+  var newT = function () { return { work: 0, late: 0, early: 0, miss: 0, absent: 0, forgot: 0, hol: 0, off: 0, comp: 0, lv: { personal: 0, sick: 0, vacation: 0, other: 0 } }; };
+  var G = newT(), dash = function (v) { return v ? v : '-'; };
+  var totCells = function (a, b, T, note) { return [a, b, '', '', 'ยอดรวม', hmm(T.work), hmm(T.late), hmm(T.early), hmm(T.miss), dash(T.absent), dash(T.forgot), dash(T.hol), dash(T.off), dash(T.comp), dash(T.lv.personal), dash(T.lv.sick), dash(T.lv.vacation), dash(T.lv.other), note]; };
+  rep.forEach(function (r) {
+    var e = r.emp, T = newT();
+    r.days.forEach(function (x) {
+      if (x.date > today || x.st === 'pre') return;
+      var sh = x.shift, std = sh ? stdMin(sh) : 0, rec = x.rec, la = x.leave && x.leave.status === 'approved' ? x.leave : null, notes = [];
+      var c = [e.code, e.name, dmy(x.date), sh ? sh.start + ' ' + sh.end : '', rec ? rec.in + (rec.out ? ' ' + rec.out : '') : '', ' - ', ' - ', ' - ', ' - ', '-', '-', '-', '-', '-', '-', '-', '-', '-', ''];
+      if (rec && rec.out) { var w = Math.max(0, (la && la.part !== 'full' ? std / 2 : std) - x.late - x.early); T.work += w; c[5] = hmm(w); }
+      if (x.late) { T.late += x.late; c[6] = hmm(x.late); }
+      if (x.early) { T.early += x.early; c[7] = hmm(x.early); }
+      var miss = 0;
+      if (x.st === 'absent') { miss = la ? std / 2 : std; T.absent += la ? 0.5 : 1; c[9] = la ? 0.5 : 1; }
+      else if (rec && !rec.out && x.date < today) { miss = std; T.forgot++; c[10] = 1; notes.push('ลืมบันทึกเวลาออก'); }
+      else miss = x.late + x.early;
+      if (miss) { T.miss += miss; c[8] = hmm(miss); }
+      if (x.holiday) { if (/ชดเชย/.test(x.holiday)) { T.comp++; c[13] = 1; } else { T.hol++; c[11] = 1; } notes.push(x.holiday); }
+      else if (!x.work && !rec) { T.off++; c[12] = 1; }
+      if (la && x.work) {
+        var k = LV.indexOf(la.type) >= 0 && la.type !== 'other' ? la.type : 'other', amt = la.part === 'full' ? 1 : 0.5;
+        T.lv[k] += amt; c[14 + LV.indexOf(k)] = amt;
+        notes.push(TC.LEAVE_TYPES[la.type] + (la.part !== 'full' ? ' (' + TC.PART[la.part] + ')' : '') + (la.reason ? ': ' + la.reason : ''));
+      } else if (x.leave && x.leave.status === 'pending') notes.push(TC.LEAVE_TYPES[x.leave.type] + ' รออนุมัติ');
+      if (rec && rec.note) notes.push(rec.note);
+      if (rec && rec.flag) notes.push('ตรวจสอบมือถือ: ' + rec.flag);
+      c[18] = notes.join(' · ');
+      rows.push({ cells: c, dow: TH_DOW[x.dow], flags: x.flags || [], st: x.st });
+    });
+    ['work', 'late', 'early', 'miss', 'absent', 'forgot', 'hol', 'off', 'comp'].forEach(function (k) { G[k] += T[k]; });
+    LV.forEach(function (k) { G.lv[k] += T.lv[k]; });
+    rows.push({ total: true, cells: totCells(e.code, e.name, T, 'ตรงเวลา ' + (r.t.onTimeRate === null ? '-' : r.t.onTimeRate + '%') + ' · มาทำงาน ' + (r.t.attendRate === null ? '-' : r.t.attendRate + '%')) });
+  });
+  if (rep.length > 1) rows.push({ total: true, grand: true, cells: totCells('', 'รวมทั้งทีม (' + rep.length + ' คน)', G, '') });
+  return { head1: H.head1, head2: H.head2, merges: H.merges, rows: rows };
+}
+function rowBg(r) { return r.grand ? 'FFF3D98B' : r.total ? 'FFFFFDD0' : r.st === 'absent' || (r.flags || []).indexOf('noOut') >= 0 ? 'FFFBE1DF' : (r.flags || []).length ? 'FFFBEAD6' : r.st === 'leave' ? 'FFE3ECFB' : (r.st === 'off' || r.st === 'holiday') ? 'FFF3F0EC' : null; }
+function sheetHtml(t) {
+  var cols = t.head1.length, skip = {};
+  t.merges.forEach(function (g) { for (var rr = g[0]; rr <= g[2]; rr++) for (var cc = g[1]; cc <= g[3]; cc++) if (rr !== g[0] || cc !== g[1]) skip[rr + ',' + cc] = 1; });
+  var cell = function (rr, cc, txt) {
+    if (skip[rr + ',' + cc]) return '';
+    var g = t.merges.filter(function (x) { return x[0] === rr && x[1] === cc; })[0];
+    return '<th' + (g ? ' rowspan="' + (g[2] - g[0] + 1) + '" colspan="' + (g[3] - g[1] + 1) + '"' : '') + '>' + esc(txt) + '</th>';
+  };
+  var th = '<tr>' + t.head1.map(function (x, i) { return cell(0, i, x); }).join('') + '</tr><tr>' + t.head2.map(function (x, i) { return cell(1, i, x); }).join('') + '</tr>';
+  var body = t.rows.map(function (r) {
+    var bg = rowBg(r);
+    return '<tr' + (r.total ? ' class="tot"' : '') + (bg ? ' style="background:#' + bg.slice(2) + ';color:#17130f"' : '') + '>' + r.cells.map(function (c, i) {
+      var v = i === 2 && r.dow ? '<span class="dw">' + r.dow + '</span> ' + esc(c) : esc(c);
+      return '<td' + (i >= 2 && i < cols - 1 ? ' class="c num"' : '') + '>' + v + '</td>';
+    }).join('') + '</tr>';
+  }).join('');
+  return '<div class="card tbl-wrap report-x xl-sheet"><table><thead>' + th + '</thead><tbody>' + (body || '<tr><td colspan="' + cols + '" class="empty">ไม่มีข้อมูลในช่วงนี้</td></tr>') + '</tbody></table></div>';
 }
 function pReport(el, banner) {
-  return api('adminMonth', { month: st.month }).then(function (d) {
-    var rep = d.report;
-    if (!rep.some(function (r) { return r.emp.id === st.selEmp; })) st.selEmp = rep[0] && rep[0].emp.id;
-    var sel = rep.filter(function (r) { return r.emp.id === st.selEmp; })[0];
-    var tot = { present: 0, lateMin: 0, early: 0, absent: 0, leave: 0, alerts: 0 };
-    rep.forEach(function (r) { tot.present += r.t.present; tot.lateMin += r.t.lateMin; tot.early += r.t.earlyMin; tot.absent += r.t.absent; tot.leave += r.t.leaveDays; tot.alerts += r.t.alerts; });
+  var today = A.ymd(new Date()), P = rangePresets(today);
+  if (!st.rFrom) { st.rFrom = P[0][2]; st.rTo = P[0][3]; }
+  if (st.rFrom > st.rTo) { var sw = st.rFrom; st.rFrom = st.rTo; st.rTo = sw; }
+  if (st.rTo > addD(st.rFrom, 365)) st.rTo = addD(st.rFrom, 365);
+  st.rView = st.rView || 'sum'; st.rEmp = st.rEmp || 'all';
+  return rangeData(st.rFrom, st.rTo).then(function (d) {
+    var all = d.report;
+    if (st.rEmp !== 'all' && !all.some(function (r) { return r.emp.id === st.rEmp; })) st.rEmp = 'all';
+    var rep = st.rEmp === 'all' ? all : all.filter(function (r) { return r.emp.id === st.rEmp; });
+    var sel = st.rEmp === 'all' ? null : rep[0];
+    st.selEmp = sel ? sel.emp.id : null;
+    var tot = { lateN: 0, lateMin: 0, earlyN: 0, early: 0, absent: 0, noOut: 0, leave: 0 };
+    rep.forEach(function (r) { tot.lateN += r.t.lateDays; tot.lateMin += r.t.lateMin; tot.earlyN += r.t.earlyDays; tot.early += r.t.earlyMin; tot.absent += r.t.absent; tot.noOut += r.t.noOut; tot.leave += r.t.leaveDays; });
     var small = function (t) { return ' <small class="muted" style="font-size:14px">' + t + '</small>'; };
-    var days = sel ? sel.days.filter(function (x) { return x.date <= d.today && x.st !== 'pre' && (x.work || x.rec || x.leave); }).filter(function (x) { return !st.onlyAlerts || x.flags.length; }) : [];
-    el.innerHTML = banner + head('รายงานรายเดือน', 'สำหรับทำเงินเดือนและ KPI · นับถึงวันนี้ · สาย/ออกก่อนเทียบกับเวลางานของแต่ละคนในแต่ละวัน · ลาครึ่งวันที่อนุมัติแล้วไม่นับสาย/ออกก่อนในช่วงที่ลา',
-      '<div class="toolbar">' + A.monthPicker('rmp', st.month) +
-      (A.REMOTE && !SUPA ? '<button class="btn primary sm" id="bs">อัปเดตชีตสรุปใน Google Sheets</button>' : '') +
-      '<button class="btn gold sm" id="xx">รายงานประจำเดือน (Excel)</button><button class="btn ghost sm" id="xs">สรุปรายบุคคล (CSV)</button><button class="btn ghost sm" id="xd">รายวัน (CSV)</button></div>') +
-      '<div id="bsout"></div>' +
-      '<div class="kpis num"><div class="card kpi k-req"><span>รายการต้องตรวจสอบ</span><b>' + tot.alerts + small('รายการ') + '</b></div>' +
-      '<div class="card kpi k-late"><span>สายรวมทั้งทีม</span><b>' + tot.lateMin + small('นาที') + '</b></div>' +
-      '<div class="card kpi k-late"><span>ออกก่อนเวลารวม</span><b>' + tot.early + small('นาที') + '</b></div>' +
-      '<div class="card kpi k-bad"><span>ขาดงานรวม</span><b>' + A.fmtDays(tot.absent) + small('วัน') + '</b></div>' +
-      '<div class="card kpi k-leave"><span>ลารวม (อนุมัติแล้ว)</span><b>' + A.fmtDays(tot.leave) + small('วัน') + '</b></div></div>' +
-      '<h3 class="sec-h">สรุปรายบุคคล · รวมทั้งทีม <small class="muted">กดที่ชื่อเพื่อดูรายวัน</small></h3>' + summaryHtml(rep) +
-      '<p class="small muted">ตรงเวลา = วันที่ไม่สาย ÷ วันที่มา · มาทำงาน = วันทำงานที่ไม่ขาด ÷ (วันทำงาน − วันลาที่อนุมัติ) · ใช้เป็นตัวชี้วัด KPI ได้</p>' +
-      (sel ? '<div class="card"><div class="panel-h"><div>' + A.person(sel.emp, sel.emp.code + ' · ' + TC.util.scheduleText(sel.emp, d.settings)) + '</div>' +
+    var sub = function (t) { return '<em>' + t + '</em>'; };
+    var curP = P.filter(function (p) { return p[2] === st.rFrom && p[3] === st.rTo; })[0];
+    var tbl = sheetTable(rep, d.settings, d.today);
+    d.label = rangeLabel(st.rFrom, st.rTo) + (sel ? ' · ' + sel.emp.name : ''); d.tag = st.rFrom + '_' + st.rTo + (sel ? '_' + (sel.emp.code || sel.emp.id) : ''); d.report = rep;
+    var detail = '';
+    if (sel && st.rView === 'sum') {
+      var days = sel.days.filter(function (x) { return x.date <= d.today && x.st !== 'pre' && (x.work || x.rec || x.leave); }).filter(function (x) { return !st.onlyAlerts || x.flags.length; });
+      detail = '<div class="card"><div class="panel-h"><div>' + A.person(sel.emp, sel.emp.code + ' · ' + TC.util.scheduleText(sel.emp, d.settings)) + '</div>' +
         '<label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="oa"' + (st.onlyAlerts ? ' checked' : '') + '> เฉพาะวันที่มีแจ้งเตือน</label></div>' +
         '<div class="tbl-wrap"><table><thead><tr><th>วันที่</th><th>เวลางาน</th><th>สถานะ</th><th class="r">เข้างาน</th><th class="r">ออกงาน</th><th>แจ้งเตือน</th><th>การลา / หมายเหตุ</th><th class="r"></th></tr></thead><tbody>' +
         (days.map(function (x) {
@@ -428,40 +533,51 @@ function pReport(el, banner) {
           return '<tr><td class="num">' + A.thDate(x.date) + '</td><td>' + shift + '</td><td>' + A.stPill(x.st) + '</td>' +
             (editing ? '<td class="r inline-edit"><input type="time" id="ei" value="' + esc(r ? r.in : '') + '"></td><td class="r inline-edit"><input type="time" id="eo" value="' + esc(r ? r.out : '') + '"></td><td></td><td class="inline-edit"><input id="en" style="width:100%" placeholder="เหตุผลที่แก้" value=""></td><td class="r" style="white-space:nowrap"><button class="btn ok sm" id="es">บันทึก</button> <button class="btn ghost sm" id="ex">ยกเลิก</button></td>'
               : '<td class="r mono" style="white-space:nowrap">' + (r ? esc(r.in) : '—') + camBtn(sel.emp, r) + '</td><td class="r mono">' + (r && r.out ? esc(r.out) : '—') + '</td><td style="white-space:normal">' + flagChips(x) + '</td><td class="small">' + esc(note) + '</td><td class="r"><button class="btn ghost sm" data-edit="' + x.date + '">แก้ไข</button></td>') + '</tr>';
-        }).join('') || '<tr><td colspan="8" class="empty">' + (st.onlyAlerts ? 'ไม่มีวันที่มีแจ้งเตือน' : 'ยังไม่มีวันทำงานในเดือนนี้') + '</td></tr>') + '</tbody></table></div></div>' : '');
-    A.bindMonthPicker('rmp', st.month, function (m) { st.month = m; st.editDay = null; go('report'); });
-    var oa = document.getElementById('oa'); if (oa) oa.onchange = function () { st.onlyAlerts = oa.checked; go('report'); };
-    el.querySelectorAll('[data-emp]').forEach(function (tr) { tr.onclick = function () { st.selEmp = tr.dataset.emp; st.editDay = null; go('report'); }; });
-    el.querySelectorAll('[data-edit]').forEach(function (b) { b.onclick = function () { st.editDay = b.dataset.edit; go('report'); }; });
+        }).join('') || '<tr><td colspan="8" class="empty">' + (st.onlyAlerts ? 'ไม่มีวันที่มีแจ้งเตือน' : 'ไม่มีวันทำงานในช่วงนี้') + '</td></tr>') + '</tbody></table></div></div>';
+    }
+    el.innerHTML = banner + head('รายงาน', 'เลือกช่วงวันที่และพนักงาน แล้วดูผลบนหน้าเว็บได้ทันที · นับถึงวันนี้ · สาย/กลับก่อนเทียบกับเวลางานของแต่ละคน') +
+      '<div class="card rbar">' +
+        '<div class="seg rp" id="rp">' + P.map(function (p) { return '<button data-v="' + p[0] + '" aria-pressed="' + (curP === p) + '">' + p[1] + '</button>'; }).join('') + '</div>' +
+        '<div class="rrow"><label class="rf"><span>ตั้งแต่</span><input type="date" id="rf" value="' + st.rFrom + '" max="' + today + '"></label>' +
+        '<label class="rf"><span>ถึง</span><input type="date" id="rt" value="' + st.rTo + '"></label>' +
+        '<label class="rf grow"><span>พนักงาน</span><select id="re"><option value="all">ทุกคน (' + all.length + ' คน)</option>' +
+          all.map(function (r) { return '<option value="' + esc(r.emp.id) + '"' + (r.emp.id === st.rEmp ? ' selected' : '') + '>' + esc((r.emp.code ? r.emp.code + ' · ' : '') + r.emp.name) + '</option>'; }).join('') + '</select></label></div>' +
+        '<div class="rrow between"><div class="seg" id="rv"><button data-v="sum" aria-pressed="' + (st.rView === 'sum') + '">สรุปยอด</button><button data-v="sheet" aria-pressed="' + (st.rView === 'sheet') + '">ตารางรายวัน (แบบ Excel)</button></div>' +
+        '<div class="hrow">' + (A.REMOTE && !SUPA ? '<button class="btn ghost sm" id="bs">อัปเดต Google Sheets</button>' : '') + '<button class="btn ghost sm" id="xlsx">ดาวน์โหลด Excel</button></div></div>' +
+      '<div id="bsout"></div><div id="xerr"></div></div>' +
+      '<p class="rlabel"><b>' + esc(rangeLabel(st.rFrom, st.rTo)) + '</b> · ' + (sel ? esc(sel.emp.name) : 'ทุกคน ' + rep.length + ' คน') + '</p>' +
+      '<div class="kpis num"><div class="card kpi k-late"><span>มาสายรวม</span><b>' + tot.lateMin + small('นาที') + '</b>' + sub(tot.lateN + ' ครั้ง · ' + hm2(tot.lateMin) + ' ชม.') + '</div>' +
+      '<div class="card kpi k-late"><span>กลับก่อนรวม</span><b>' + tot.early + small('นาที') + '</b>' + sub(tot.earlyN + ' ครั้ง · ' + hm2(tot.early) + ' ชม.') + '</div>' +
+      '<div class="card kpi k-bad"><span>ขาดงานรวม</span><b>' + A.fmtDays(tot.absent) + small('วัน') + '</b>' + sub('ไม่มาโดยไม่ได้ลา') + '</div>' +
+      '<div class="card kpi k-bad"><span>ลืมบันทึกออก</span><b>' + tot.noOut + small('ครั้ง') + '</b>' + sub('เช็คอินแล้วไม่เช็คเอาท์') + '</div>' +
+      '<div class="card kpi k-leave"><span>ลารวม</span><b>' + A.fmtDays(tot.leave) + small('วัน') + '</b>' + sub('เฉพาะที่อนุมัติแล้ว') + '</div></div>' +
+      (st.rView === 'sum'
+        ? '<h3 class="sec-h">สรุปรายบุคคล' + (sel ? '' : ' · รวมทั้งทีม') + ' <small class="muted">' + (sel ? '' : 'กดที่ชื่อเพื่อดูรายวันของคนนั้น') + '</small></h3>' + summaryHtml(rep) +
+          '<p class="small muted">ตรงเวลา = วันที่ไม่สาย ÷ วันที่มา · มาทำงาน = วันทำงานที่ไม่ขาด ÷ (วันทำงาน − วันลาที่อนุมัติ)</p>' + detail
+        : '<p class="small muted">รูปแบบเดียวกับไฟล์ Export AllSum เดิม · ชม.งาน = เวลางานหักพักเที่ยง 1 ชม. ลบสาย/กลับก่อน · ขาดงาน = สาย + กลับก่อน (หรือทั้งวันเมื่อไม่มา/ลืมบันทึก) · แถวสีเหลือง = ยอดรวมของแต่ละคน</p>' + sheetHtml(tbl));
+    var re = function () { st.editDay = null; go('report', true); };
+    el.querySelectorAll('#rp [data-v]').forEach(function (b) { b.onclick = function () { var p = P.filter(function (x) { return x[0] === b.dataset.v; })[0]; st.rFrom = p[2]; st.rTo = p[3]; re(); }; });
+    var rf = document.getElementById('rf'), rt = document.getElementById('rt');
+    rf.onchange = function () { if (rf.value) { st.rFrom = rf.value; if (st.rTo < st.rFrom) st.rTo = st.rFrom; re(); } };
+    rt.onchange = function () { if (rt.value) { st.rTo = rt.value; if (st.rTo < st.rFrom) st.rFrom = st.rTo; re(); } };
+    document.getElementById('re').onchange = function (ev) { st.rEmp = ev.target.value; re(); };
+    el.querySelectorAll('#rv [data-v]').forEach(function (b) { b.onclick = function () { st.rView = b.dataset.v; re(); }; });
+    var oa = document.getElementById('oa'); if (oa) oa.onchange = function () { st.onlyAlerts = oa.checked; re(); };
+    el.querySelectorAll('[data-emp]').forEach(function (tr) { tr.onclick = function () { st.rEmp = tr.dataset.emp; re(); }; });
+    el.querySelectorAll('[data-edit]').forEach(function (b) { b.onclick = function () { st.editDay = b.dataset.edit; go('report', true); }; });
     bindCams(el);
-    var ex = document.getElementById('ex'); if (ex) ex.onclick = function () { st.editDay = null; go('report'); };
+    var ex = document.getElementById('ex'); if (ex) ex.onclick = re;
     var es = document.getElementById('es'); if (es) es.onclick = function () {
       es.disabled = true;
       api('editRecord', { empId: st.selEmp, date: st.editDay, in: document.getElementById('ei').value, out: document.getElementById('eo').value, note: document.getElementById('en').value })
-        .then(function () { st.editDay = null; A.toast('บันทึกเวลาแล้ว'); go('report'); }).catch(function (e) { A.toast(e.message); es.disabled = false; });
+        .then(function () { st.editDay = null; A.toast('บันทึกเวลาแล้ว'); go('report', true); }).catch(function (e) { A.toast(e.message); es.disabled = false; });
     };
     var bs = document.getElementById('bs'); if (bs) bs.onclick = function () {
-      bs.disabled = true; bs.textContent = 'กำลังสร้างชีต…';
-      api('buildMonth', { month: st.month }).then(function (r) { document.getElementById('bsout').innerHTML = '<div class="note">อัปเดตชีต "สรุป ' + st.month + '" แล้ว · <a href="' + esc(r.url) + '" target="_blank" rel="noopener">เปิด Google Sheet ↗</a></div>'; })
-        .catch(function (e) { err('bsout', e); }).then(function () { bs.disabled = false; bs.textContent = 'อัปเดตชีตสรุปใน Google Sheets'; });
+      bs.disabled = true; var m = st.rFrom.slice(0, 7);
+      api('buildMonth', { month: m }).then(function (r) { document.getElementById('bsout').innerHTML = '<div class="note">อัปเดตชีต "สรุป ' + m + '" แล้ว · <a href="' + esc(r.url) + '" target="_blank" rel="noopener">เปิด Google Sheet ↗</a></div>'; })
+        .catch(function (e) { err('bsout', e); }).then(function () { bs.disabled = false; });
     };
-    var show = function (name, text) {
-      A.download(name, text);
-      A.modal('<div class="sheet-h"><h3>' + esc(name) + '</h3><button class="x" data-close aria-label="ปิด">×</button></div><div class="sheet-b"><p class="small muted">ไฟล์ดาวน์โหลดแล้ว ถ้าไม่ขึ้น คัดลอกข้อความนี้ไปวางใน Excel / Google Sheets ได้</p><textarea class="csv" id="csvt" readonly>' + esc(text) + '</textarea><button class="btn ghost" id="cp">คัดลอก</button></div>', 'wide');
-      document.getElementById('cp').onclick = function () { var t = document.getElementById('csvt'); (navigator.clipboard ? navigator.clipboard.writeText(t.value) : Promise.reject()).then(function () { A.toast('คัดลอกแล้ว'); }, function () { t.select(); A.toast('เลือกข้อความแล้ว กด Ctrl+C'); }); };
-    };
-    var FL = { late: 'สาย', early: 'ออกก่อนเวลา', noOut: 'ลืมเช็คเอาท์', absent: 'ขาด', device: 'ตรวจสอบมือถือ' };
-    document.getElementById('xx').onclick = function () { monthlyReport(d); };
-    document.getElementById('xs').onclick = function () {
-      var S = teamSummary(rep), row = function (r) { return S.cols.map(function (c) { return r[c[0]]; }); };
-      show('TESR-สรุปรายบุคคล-' + st.month + '.csv', A.csv([S.cols.map(function (c) { return c[1]; })].concat(S.rows.map(row)).concat([row(S.total)])));
-    };
-    document.getElementById('xd').onclick = function () {
-      var lines = [['วันที่', 'รหัส', 'ชื่อ', 'เวลางาน', 'สถานะ', 'เข้างาน', 'ออกงาน', 'สาย(นาที)', 'ออกก่อน(นาที)', 'แจ้งเตือน', 'การลา', 'หมายเหตุ']];
-      rep.forEach(function (r) { r.days.forEach(function (x) { if (x.date > d.today || x.st === 'pre' || !(x.work || x.rec || x.leave)) return;
-        lines.push([x.date, r.emp.code, r.emp.name, x.shift ? x.shift.start + '-' + x.shift.end : '', A.ST[x.st][1], x.rec ? x.rec.in : '', x.rec ? x.rec.out : '', x.rec ? x.late : '', x.rec ? x.early : '', x.flags.map(function (f) { return FL[f]; }).join(', '), x.leave ? A.leaveLabel(x.leave) + (x.leave.status !== 'approved' ? ' (รออนุมัติ)' : '') : '', [(x.rec && x.rec.note) || x.holiday, x.rec && x.rec.flag ? 'มือถือ: ' + x.rec.flag : ''].filter(String).join(' · ')]); }); });
-      show('TESR-daily-' + st.month + '.csv', A.csv(lines));
-    };
+    document.getElementById('xlsx').onclick = function () { downloadXlsx(d, tbl); };
   });
 }
 
