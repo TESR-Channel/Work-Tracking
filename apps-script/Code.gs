@@ -506,7 +506,10 @@ var TC = (function () {
     return function () { c.A.cachePut(key, String(n + 1), 900); };
   }
   /** QR แบบถาวร (พิมพ์ติดผนัง) เปลี่ยนเมื่อแอดมินกด "สร้าง QR ใหม่" · แบบรายวันเปลี่ยนทุกวัน */
-  function qrToken(c, date) { return c.S.qrMode === 'daily' ? c.A.hmac('qr|' + date).slice(0, 12) : c.A.hmac('qr|static|' + str(c.S.qrVer || '1')).slice(0, 12); }
+  function qrToken(c, date) {
+    var fixed = str(c.A.getSettings().qrFixed); // รหัส QR ที่พิมพ์ไว้แล้ว (ใช้ตอนย้ายระบบ เพื่อไม่ต้องพิมพ์ QR ใหม่)
+    if (c.S.qrMode !== 'daily' && /^[A-Za-z0-9]{6,40}$/.test(fixed)) return fixed;
+    return c.S.qrMode === 'daily' ? c.A.hmac('qr|' + date).slice(0, 12) : c.A.hmac('qr|static|' + str(c.S.qrVer || '1')).slice(0, 12); }
 
   /* =================== public actions =================== */
   function login(c) {
@@ -857,7 +860,7 @@ var TC = (function () {
     return { date: d, token: t, mode: c.S.qrMode, ver: str(c.S.qrVer || '1'), payload: base ? base + '?t=' + t : 'TESR-ATTEND|' + (c.S.qrMode === 'daily' ? d : 'fixed') + '|' + t };
   }
   /** ยกเลิก QR ที่พิมพ์ไว้ แล้วสร้างชุดใหม่ (ใช้เมื่อ QR หลุดออกไปนอกออฟฟิศ) */
-  function rotateQr(c) { c.A.setSetting('qrVer', String(num(c.S.qrVer, 1) + 1)); c.S = settings(c.A); return qr(c); }
+  function rotateQr(c) { c.A.setSetting('qrFixed', ''); c.A.setSetting('qrVer', String(num(c.S.qrVer, 1) + 1)); c.S = settings(c.A); return qr(c); }
   function editRecord(c) {
     var e = findEmp(c, str(c.p.empId)), date = str(c.p.date), tin = str(c.p.in), tout = str(c.p.out), note = str(c.p.note) || 'แก้ไขโดยแอดมิน';
     if (!isDate(date)) throw E('วันที่ไม่ถูกต้อง');
