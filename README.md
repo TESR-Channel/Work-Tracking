@@ -7,7 +7,16 @@
 | `index.html` | พนักงาน: เช็คอิน/เช็คเอาท์ด้วย QR + GPS, ปฏิทินของฉัน, ยื่นใบลา, ขอแก้เวลา, โปรไฟล์ | มือถือ / iPad |
 | `admin.html` | แอดมิน: ภาพรวมวันนี้, อนุมัติคำขอ, ปฏิทินทีม, รายงานรายเดือน, พนักงาน, วันหยุด, ตั้งค่า & QR | คอมพิวเตอร์ (ใช้บนมือถือได้) |
 
-ข้อมูลทั้งหมดเก็บใน Google Sheet ผ่าน Google Apps Script
+ข้อมูลทั้งหมดเก็บใน **Supabase** (Postgres + Storage) ผ่าน Edge Function `tesr` (ภูมิภาคสิงคโปร์) ตั้งแต่ 8 ต.ค. 2569
+ระบบเดิมที่ใช้ Google Sheet + Apps Script ยังเก็บไว้เป็นทางสำรอง ดูวิธีสลับได้ใน `assets/config.js`
+
+## Supabase (ระบบปัจจุบัน)
+- **ตาราง:** `public.tc_rows (tbl, key, data jsonb)` 1 แถว = 1 แถวของชีตเดิม (Employees, Records, Leaves, Adjustments, Holidays, Settings, Cache) เปิด RLS ไว้และไม่มี policy จึงเข้าถึงได้เฉพาะ Edge Function
+- **ที่เก็บรูป:** bucket `photos` (สาธารณะ: รูปโปรไฟล์) และ `selfies` (ส่วนตัว: แอดมินดูผ่านลิงก์ชั่วคราว 1 ชม.)
+- **Edge Function:** `supabase/functions/tesr/index.ts` สร้างจาก `./build.sh` = `assets/core.js` + `src/supabase-edge.ts` (logic ชุดเดียวกับ Apps Script)
+- **Deploy:** ฟังก์ชันที่รันอยู่ import ไฟล์นี้จาก GitHub ตาม commit ที่ระบุ ถ้าแก้โค้ด ให้ push ก่อน แล้ว deploy wrapper ใหม่ให้ชี้ commit ล่าสุด
+- **ดู/แก้ข้อมูล:** Supabase Dashboard → Table Editor → `tc_rows` (คอลัมน์ `data`)
+- **รายงาน:** แอดมิน → รายงานรายเดือน → "รายงานประจำเดือน (Excel)" (ปุ่มอัปเดต Google Sheet ใช้เฉพาะระบบเดิม)
 
 ## การแยกสิทธิ์และความปลอดภัย
 - **ล็อกอินแยกกัน:** พนักงานและแอดมินใช้หน้าล็อกอินคนละหน้า และใช้ token คนละแบบ server ตรวจสิทธิ์ทุกคำสั่ง บัญชีพนักงานจึงเรียกคำสั่งของแอดมินไม่ได้แม้จะเปิดหน้า `admin.html`

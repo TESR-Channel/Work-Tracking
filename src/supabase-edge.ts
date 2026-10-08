@@ -126,8 +126,9 @@ Deno.serve(async (req: Request) => {
     // บันทึกเสมอ (รวมถึงตอนล็อกอินผิด เพื่อนับครั้งที่ผิด) · ถ้าบันทึกไม่สำเร็จ แจ้งเป็น error
     if (dirty()) await flush();
     if (res.ok && p.action === 'selfie' && res.data && typeof res.data.data === 'string' && res.data.data.indexOf('__SIGN__') === 0) {
-      const { data, error } = await sb.storage.from('selfies').createSignedUrl(res.data.data.slice(8), 3600);
-      res.data.data = error ? '' : data.signedUrl;
+      const ref = res.data.data.slice(8);
+      if (ref.indexOf('drive:') === 0) res.data.data = 'https://drive.google.com/thumbnail?sz=w800&id=' + encodeURIComponent(ref.slice(6)); // รูปเก่าจากช่วงที่ใช้ Google Drive (ดูได้เมื่อล็อกอิน Google บัญชีเจ้าของ)
+      else { const { data, error } = await sb.storage.from('selfies').createSignedUrl(ref, 3600); res.data.data = error ? '' : data.signedUrl; }
     }
     if (res.ok && p.action === 'sync' && res.data && res.data.role === 'admin') {
       const S = A.getSettings(), key = 'cleanup:' + nowBkk().date;
