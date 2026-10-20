@@ -26,6 +26,9 @@
 .rrow.between{justify-content:space-between;align-items:center}
 .rf{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted);flex:0 1 170px}
 .rf.grow{flex:1 1 220px}
+.remember{display:flex;gap:10px;align-items:flex-start;font-size:14px;cursor:pointer;margin:2px 0 4px}
+.remember input{width:20px;height:20px;margin-top:1px;accent-color:var(--crimson);flex:none}
+.remember small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
 .rf input,.rf select{height:40px;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:10px;padding:0 10px;font:inherit;font-size:15px;font-weight:600;width:100%}
 .rlabel{margin:4px 0 10px;font-size:15px}
 .kpi em{display:block;font-style:normal;font-size:12px;color:var(--muted);margin-top:2px}
@@ -42,7 +45,7 @@
 <script src="assets/config.js"></script>
 <script src="assets/core.js"></script>
 <script src="assets/mock.js"></script>
-<script src="assets/app.js?v=20261008b"></script>
+<script src="assets/app.js?v=20261020a"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 (function () {
@@ -60,15 +63,18 @@ function showLogin(msg) {
     '<div class="login-brand"><span class="logo lg" role="img" aria-label="TESR"></span><div><b>Time Clock Admin</b><small>สำหรับผู้ดูแลระบบเท่านั้น</small></div></div>' +
     '<div class="field"><label for="u">อีเมล / ชื่อผู้ใช้แอดมิน</label><input id="u" autocomplete="username" autocapitalize="none" required></div>' +
     '<div class="field"><label for="p">รหัสผ่าน</label><input id="p" type="password" autocomplete="current-password" required></div>' +
+    '<label class="remember"><input type="checkbox" id="rm" checked> <span>จดจำการเข้าสู่ระบบในเครื่องนี้<small>ไม่ต้องพิมพ์รหัสใหม่ทุกครั้ง (30 วัน ต่ออายุเองเมื่อใช้งาน) · ไม่ควรติ๊กบนเครื่องของคนอื่น</small></span></label>' +
     '<div id="lerr"></div><button class="btn primary block" type="submit">เข้าสู่ระบบแอดมิน</button>' +
     (A.REMOTE ? '' : '<div class="demo-hint">โหมดทดลอง · <code>admin</code> / <code>tesr1234</code><br>พนักงานทดลอง · <code>somchai@example.com</code> / <code>0800000001</code></div>') +
     '<a href="index.html" class="small" style="text-align:center">ไปหน้าลงเวลาสำหรับพนักงาน</a></form></div>';
   if (msg) document.getElementById('lerr').innerHTML = '<div class="err">' + esc(msg) + '</div>';
+  var lu = A.store.get('tesr-last-user:admin'); if (lu) document.getElementById('u').value = lu;
   document.getElementById('lf').onsubmit = function (ev) {
     ev.preventDefault();
     var b = ev.target.querySelector('button'); b.disabled = true;
-    api('login', { as: 'admin', username: document.getElementById('u').value, password: document.getElementById('p').value })
-      .then(function (r) { A.store.set(TOKEN, r.token); start(); })
+    var u = document.getElementById('u').value.trim(), rm = document.getElementById('rm').checked;
+    api('login', { as: 'admin', username: u, password: document.getElementById('p').value, remember: rm ? 1 : 0 })
+      .then(function (r) { A.store.set(TOKEN, r.token); A.store.set('tesr-last-user:admin', u); start(); })
       .catch(function (e) { document.getElementById('lerr').innerHTML = '<div class="err">' + esc(e.message) + '</div>'; b.disabled = false; });
   };
 }
@@ -87,7 +93,12 @@ function start() {
     INFO = d; var t = new Date();
     st.month = st.month || A.ymd(t).slice(0, 7); st.calMonth = st.calMonth || st.month; st.holYear = st.holYear || t.getFullYear();
     shell(); go(page);
-  }).catch(function (e) { if (e.code !== 'AUTH') showLogin(e.message); });
+  }).catch(function (e) {
+    if (e.code === 'AUTH') return;
+    root.innerHTML = '<div class="login-wrap"><div class="login-card"><div class="login-brand"><span class="logo lg" role="img" aria-label="TESR"></span><div><b>Time Clock Admin</b><small>ยังเข้าสู่ระบบอยู่</small></div></div>' +
+      '<div class="err">' + esc(e.message || 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้') + '</div><button class="btn primary block" id="rty">ลองใหม่</button></div></div>';
+    document.getElementById('rty').onclick = start;
+  });
 }
 function shell() {
   root.innerHTML = '<div class="adm"><aside class="side"><div class="brand"><span class="logo" role="img" aria-label="TESR"></span><div><b>Time Clock</b><small>Admin console</small></div><button class="mlo" id="lo2" type="button">ออกจากระบบ</button></div>' +
