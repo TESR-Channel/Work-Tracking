@@ -158,19 +158,27 @@ var TC = (function () {
 
   /* ---------- auth ---------- */
   function ver(A, h) { return A.hmac('v|' + (h || '')).slice(0, 8); }
-  function sign(c, role, id, v, hours) {
-    var p = [role, id, v, c.now.ms + hours * 3600000].join('.');
+  /** อายุการเข้าสู่ระบบ (ชั่วโมง): "จดจำในเครื่องนี้" อยู่ได้นาน และต่ออายุให้เองทุกครั้งที่เปิดใช้ · ไม่จดจำ = หมดอายุเร็ว */
+  var REMEMBER_H = { admin: 24 * 30, emp: 24 * 180 }, SESSION_H = { admin: 12, emp: 24 };
+  function sign(c, role, id, v, rem) {
+    var p = [role, id, v, c.now.ms + (rem ? REMEMBER_H : SESSION_H)[role] * 3600000].concat(rem ? ['r'] : []).join('.');
     return p + '.' + c.A.hmac(p);
   }
+  function wantRemember(p) { var r = p.remember; return r === undefined || r === null || r === '' ? true : !(r === false || r === 0 || r === '0' || r === 'false'); }
   function verify(c, tok) {
     var parts = str(tok).split('.');
-    if (parts.length !== 5) return null;
-    var p = parts.slice(0, 4).join('.');
-    if (c.A.hmac(p) !== parts[4] || +parts[3] < c.now.ms) return null;
-    if (parts[0] === 'admin') return parts[2] === ver(c.A, c.S.adminHash) ? { role: 'admin', id: 'admin' } : null;
+    if (parts.length !== 5 && parts.length !== 6) return null;
+    var p = parts.slice(0, -1).join('.'), exp = +parts[3], rem = parts.length === 6 && parts[4] === 'r';
+    if (c.A.hmac(p) !== parts[parts.length - 1] || !(exp >= c.now.ms)) return null;
+    if (parts[0] === 'admin') return parts[2] === ver(c.A, c.S.adminHash) ? { role: 'admin', id: 'admin', exp: exp, rem: rem } : null;
     var e = emps(c.A).filter(function (x) { return x.id === parts[1]; })[0];
     if (!e || !isActive(e) || parts[2] !== ver(c.A, e.passHash)) return null;
-    return { role: 'emp', id: e.id, emp: e };
+    return { role: 'emp', id: e.id, emp: e, exp: exp, rem: rem };
+  }
+  /** ต่ออายุการจดจำเมื่อใช้ไปเกินครึ่งอายุ (เปิดใช้เรื่อยๆ จะไม่ต้องล็อกอินใหม่) */
+  function renewToken(c) {
+    var s = c.sess; if (!s || !s.rem || s.exp - c.now.ms > REMEMBER_H[s.role] * 3600000 / 2) return '';
+    return s.role === 'admin' ? sign(c, 'admin', 'admin', ver(c.A, c.S.adminHash), true) : sign(c, 'emp', s.id, ver(c.A, s.emp.passHash), true);
   }
   function hashPw(A, pw) { var salt = A.uuid(); return salt + '$' + A.sha256(salt + '|' + pw); }
   function checkPw(A, stored, pw) { var s = str(stored), i = s.indexOf('$'); return i > 0 && A.sha256(s.slice(0, i) + '|' + pw) === s.slice(i + 1); }
@@ -201,11 +209,11 @@ var TC = (function () {
     if (c.p.as === 'admin') {
       var ok = u === str(c.S.adminUser).toLowerCase() && (c.S.adminHash ? checkPw(c.A, c.S.adminHash, pw) : pw === DEFAULT_ADMIN_PASSWORD);
       if (!ok) { fail(); throw E('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง'); }
-      return { role: 'admin', token: sign(c, 'admin', 'admin', ver(c.A, c.S.adminHash), 12), mustChange: !c.S.adminHash, name: c.S.adminUser };
+      return { role: 'admin', token: sign(c, 'admin', 'admin', ver(c.A, c.S.adminHash), wantRemember(c.p)), mustChange: !c.S.adminHash, name: c.S.adminUser };
     }
     var e = emps(c.A).filter(function (x) { return isActive(x) && emailOf(x) === u; })[0];
     if (!e || !empPwOk(c.A, e, pw)) { fail(); throw E('อีเมลหรือรหัสผ่านไม่ถูกต้อง'); }
-    return { role: 'emp', token: sign(c, 'emp', e.id, ver(c.A, e.passHash), 24 * 60), emp: pubEmp(e) };
+    return { role: 'emp', token: sign(c, 'emp', e.id, ver(c.A, e.passHash), wantRemember(c.p)), emp: pubEmp(e) };
   }
 
 
@@ -289,7 +297,7 @@ var TC = (function () {
     validPw(c.p.password);
     var h = hashPw(c.A, String(c.p.password));
     c.A.update(TABLES.EMP, e, { passHash: h });
-    return { token: sign(c, 'emp', e.id, ver(c.A, h), 24 * 60) };
+    return { token: sign(c, 'emp', e.id, ver(c.A, h), !!c.sess.rem) };
   }
   function leaveCreate(c) {
     var e = myEmp(c), type = str(c.p.type), start = str(c.p.start), end = str(c.p.end) || start, part = str(c.p.part) || 'full', reason = str(c.p.reason);
@@ -535,7 +543,7 @@ var TC = (function () {
     if (emps(c.A).some(function (e) { return isActive(e) && emailOf(e) === u; })) throw E('ชื่อผู้ใช้นี้ซ้ำกับอีเมลของพนักงาน');
     var h = hashPw(c.A, pw);
     c.A.setSetting('adminUser', u); c.A.setSetting('adminHash', h);
-    return { token: sign(c, 'admin', 'admin', ver(c.A, h), 12), name: u };
+    return { token: sign(c, 'admin', 'admin', ver(c.A, h), !!c.sess.rem), name: u };
   }
   function qr(c) {
     var d = c.now.date, t = qrToken(c, d), base = str(c.S.appUrl).replace(/[?#].*$/, '');
@@ -686,7 +694,8 @@ var TC = (function () {
         Adjustments: c.A.rows(TABLES.ADJ).filter(mine).map(strip),
         Holidays: c.A.rows(TABLES.HOL).map(strip)
       },
-      qr: admin ? qr(c) : null
+      qr: admin ? qr(c) : null,
+      renew: renewToken(c)
     };
   }
   /** คำนวณคำสั่ง "อ่าน" ในเครื่องจากข้อมูล sync (ไม่ต้องรอเซิร์ฟเวอร์) */
