@@ -14,6 +14,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
 <link rel="stylesheet" href="assets/styles.css">
+<style>
+.remember{display:flex;gap:10px;align-items:flex-start;font-size:14px;cursor:pointer;margin:2px 0 4px}
+.remember input{width:20px;height:20px;margin-top:1px;accent-color:var(--crimson);flex:none}
+.remember small{display:block;color:var(--ink-muted,var(--muted));font-size:12px;margin-top:2px}
+</style>
 </head>
 <body>
 <div id="app"><div class="loading">กำลังโหลด…</div></div>
@@ -22,7 +27,7 @@
 <script src="assets/config.js"></script>
 <script src="assets/core.js"></script>
 <script src="assets/mock.js"></script>
-<script src="assets/app.js?v=20261008b"></script>
+<script src="assets/app.js?v=20261020a"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <script>
 (function () {
@@ -39,17 +44,20 @@ function showLogin(msg) {
     '<div class="login-brand"><span class="logo lg" role="img" aria-label="TESR"></span><div><b>Time Clock</b><small>Thai Embedded System and Robotics · ลงเวลาเข้า–ออกงาน</small></div></div>' +
     '<div class="field"><label for="u">อีเมล</label><input id="u" type="email" autocomplete="username" autocapitalize="none" inputmode="email" required></div>' +
     '<div class="field"><label for="p">รหัสผ่าน</label><input id="p" type="password" autocomplete="current-password" required></div>' +
+    '<label class="remember"><input type="checkbox" id="rm" checked> <span>จดจำการเข้าสู่ระบบในเครื่องนี้<small>ไม่ต้องพิมพ์รหัสใหม่ทุกครั้ง · ไม่ควรติ๊กบนเครื่องของคนอื่น</small></span></label>' +
     '<p class="small muted">ครั้งแรกใช้รหัสผ่านเป็นเบอร์โทรศัพท์ที่ให้ไว้กับบริษัท (เช่น 0891234567) เปลี่ยนเองได้ที่หน้าโปรไฟล์</p>' +
     '<div id="lerr"></div><button class="btn primary block" type="submit">เข้าสู่ระบบ</button>' +
     (A.REMOTE ? '' : '<div class="demo-hint">โหมดทดลอง · <code>somchai@example.com</code> / <code>0800000001</code></div>') +
     '</form></div>';
   if (msg) document.getElementById('lerr').innerHTML = '<div class="err">' + esc(msg) + '</div>';
+  var lu = A.store.get('tesr-last-user:emp'); if (lu) { document.getElementById('u').value = lu; }
   var f = document.getElementById('lf');
   f.onsubmit = function (ev) {
     ev.preventDefault();
     var btn = f.querySelector('button[type=submit]'); btn.disabled = true;
-    api('login', { as: 'emp', username: document.getElementById('u').value, password: document.getElementById('p').value })
-      .then(function (r) { A.store.set(TOKEN, r.token); start(); })
+    var u = document.getElementById('u').value.trim(), rm = document.getElementById('rm').checked;
+    api('login', { as: 'emp', username: u, password: document.getElementById('p').value, remember: rm ? 1 : 0 })
+      .then(function (r) { A.store.set(TOKEN, r.token); A.store.set('tesr-last-user:emp', u); start(); })
       .catch(function (e) { document.getElementById('lerr').innerHTML = '<div class="err">' + esc(e.message) + '</div>'; btn.disabled = false; });
   };
 }
@@ -63,7 +71,13 @@ function start() {
     ME = d; calMonth = calMonth || d.today.slice(0, 7);
     shell(); go(view);
     if (urlToken) { var t = urlToken; urlToken = ''; var r = ME.rec; if (!r || !r.out) openPunch(r ? 'out' : 'in', t); }
-  }).catch(function (e) { if (e.code !== 'AUTH') showLogin(e.message); });
+  }).catch(function (e) { if (e.code !== 'AUTH') offline(e.message, start); });
+}
+/** เชื่อมต่อไม่ได้ชั่วคราว: ยังจำการเข้าสู่ระบบไว้ ให้กดลองใหม่ (ไม่เด้งไปหน้าพิมพ์รหัส) */
+function offline(msg, retry) {
+  root.innerHTML = '<div class="login-wrap"><div class="login-card"><div class="login-brand"><span class="logo lg" role="img" aria-label="TESR"></span><div><b>Time Clock</b><small>ยังเข้าสู่ระบบอยู่</small></div></div>' +
+    '<div class="err">' + esc(msg || 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้') + '</div><button class="btn primary block" id="rty">ลองใหม่</button></div></div>';
+  document.getElementById('rty').onclick = retry;
 }
 function shell() {
   var tabs = [['home', 'หน้าแรก', 'home'], ['cal', 'ปฏิทิน', 'cal'], ['leave', 'การลา', 'leave'], ['me', 'โปรไฟล์', 'user']];
