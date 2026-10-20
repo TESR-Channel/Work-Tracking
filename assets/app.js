@@ -98,6 +98,7 @@ var APP = (function () {
     var sig = function (d) { return d ? JSON.stringify([d.settings, d.tables, d.qr]) : ''; };
     var setSnap = function (d, quiet) {
       var before = sig(snap); d.recv = d.recv || Date.now(); d.got = Date.now();
+      if (d.renew) { store.set(tokenKey, d.renew); d.renew = ''; } // ต่ออายุการจดจำเข้าสู่ระบบ
       snap = d; SA = snapAdapter(d);
       try { localStorage.setItem(SK, JSON.stringify(d)); } catch (e) {}
       if (!quiet && before && before !== sig(d)) notify('sync');
