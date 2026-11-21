@@ -28,6 +28,7 @@
 .rf.grow{flex:1 1 220px}
 .remember{display:flex;gap:10px;align-items:flex-start;font-size:14px;cursor:pointer;margin:2px 0 4px}
 .remember input{width:20px;height:20px;margin-top:1px;accent-color:var(--crimson);flex:none}
+.ver{text-align:center;font-size:11.5px;color:var(--muted,#8a7f72);margin-top:12px;opacity:.85}
 .remember small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
 .rf input,.rf select{height:40px;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:10px;padding:0 10px;font:inherit;font-size:15px;font-weight:600;width:100%}
 .rlabel{margin:4px 0 10px;font-size:15px}
@@ -45,7 +46,7 @@
 <script src="assets/config.js"></script>
 <script src="assets/core.js"></script>
 <script src="assets/mock.js"></script>
-<script src="assets/app.js?v=20261020a"></script>
+<script src="assets/app.js?v=20261121a"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 (function () {
@@ -66,7 +67,9 @@ function showLogin(msg) {
     '<label class="remember"><input type="checkbox" id="rm" checked> <span>จดจำการเข้าสู่ระบบในเครื่องนี้<small>ไม่ต้องพิมพ์รหัสใหม่ทุกครั้ง (30 วัน ต่ออายุเองเมื่อใช้งาน) · ไม่ควรติ๊กบนเครื่องของคนอื่น</small></span></label>' +
     '<div id="lerr"></div><button class="btn primary block" type="submit">เข้าสู่ระบบแอดมิน</button>' +
     (A.REMOTE ? '' : '<div class="demo-hint">โหมดทดลอง · <code>admin</code> / <code>tesr1234</code><br>พนักงานทดลอง · <code>somchai@example.com</code> / <code>0800000001</code></div>') +
-    '<a href="index.html" class="small" style="text-align:center">ไปหน้าลงเวลาสำหรับพนักงาน</a></form></div>';
+    '<a href="index.html" class="small" style="text-align:center">ไปหน้าลงเวลาสำหรับพนักงาน</a>' +
+    '<div class="ver">TESR Time Clock ' + esc(A.VERSION) + '</div>' +
+    '</form></div>';
   if (msg) document.getElementById('lerr').innerHTML = '<div class="err">' + esc(msg) + '</div>';
   var lu = A.store.get('tesr-last-user:admin'); if (lu) document.getElementById('u').value = lu;
   document.getElementById('lf').onsubmit = function (ev) {
@@ -101,7 +104,7 @@ function start() {
   });
 }
 function shell() {
-  root.innerHTML = '<div class="adm"><aside class="side"><div class="brand"><span class="logo" role="img" aria-label="TESR"></span><div><b>Time Clock</b><small>Admin console</small></div><button class="mlo" id="lo2" type="button">ออกจากระบบ</button></div>' +
+  root.innerHTML = '<div class="adm"><aside class="side"><div class="brand"><span class="logo" role="img" aria-label="TESR"></span><div><b>Time Clock</b><small>Admin console · ' + esc(A.VERSION.split(' ')[0]) + '</small></div><button class="mlo" id="lo2" type="button">ออกจากระบบ</button></div>' +
     '<nav aria-label="เมนูแอดมิน">' + NAV.map(function (n) { return '<button data-p="' + n[0] + '">' + A.ICON[n[2]] + '<span>' + n[1] + '</span>' + (n[0] === 'req' ? '<span class="cnt" id="reqCnt" hidden></span>' : '') + '</button>'; }).join('') + '</nav>' +
     '<div class="foot"><span>เข้าสู่ระบบเป็น <b style="color:var(--gold)">' + esc(INFO.adminUser) + '</b></span><button id="lo">ออกจากระบบ</button><a href="index.html" style="color:var(--ink-muted)">หน้าพนักงาน ↗</a></div></aside>' +
     '<main class="main" id="main"></main></div>';

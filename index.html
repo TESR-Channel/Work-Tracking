@@ -17,6 +17,8 @@
 <style>
 .remember{display:flex;gap:10px;align-items:flex-start;font-size:14px;cursor:pointer;margin:2px 0 4px}
 .remember input{width:20px;height:20px;margin-top:1px;accent-color:var(--crimson);flex:none}
+.ver{text-align:center;font-size:11.5px;color:var(--ink-muted,#8a7f72);margin-top:12px;opacity:.85}
+.vtag{font-size:10.5px;font-weight:600;color:var(--ink-muted,#8a7f72);border:1px solid currentColor;border-radius:999px;padding:1px 7px;margin-left:8px;opacity:.8}
 .remember small{display:block;color:var(--ink-muted,var(--muted));font-size:12px;margin-top:2px}
 </style>
 </head>
@@ -27,7 +29,7 @@
 <script src="assets/config.js"></script>
 <script src="assets/core.js"></script>
 <script src="assets/mock.js"></script>
-<script src="assets/app.js?v=20261020a"></script>
+<script src="assets/app.js?v=20261121a"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <script>
 (function () {
@@ -48,6 +50,7 @@ function showLogin(msg) {
     '<p class="small muted">ครั้งแรกใช้รหัสผ่านเป็นเบอร์โทรศัพท์ที่ให้ไว้กับบริษัท (เช่น 0891234567) เปลี่ยนเองได้ที่หน้าโปรไฟล์</p>' +
     '<div id="lerr"></div><button class="btn primary block" type="submit">เข้าสู่ระบบ</button>' +
     (A.REMOTE ? '' : '<div class="demo-hint">โหมดทดลอง · <code>somchai@example.com</code> / <code>0800000001</code></div>') +
+    '<div class="ver">TESR Time Clock ' + esc(A.VERSION) + '</div>' +
     '</form></div>';
   if (msg) document.getElementById('lerr').innerHTML = '<div class="err">' + esc(msg) + '</div>';
   var lu = A.store.get('tesr-last-user:emp'); if (lu) { document.getElementById('u').value = lu; }
@@ -57,7 +60,11 @@ function showLogin(msg) {
     var btn = f.querySelector('button[type=submit]'); btn.disabled = true;
     var u = document.getElementById('u').value.trim(), rm = document.getElementById('rm').checked;
     api('login', { as: 'emp', username: u, password: document.getElementById('p').value, remember: rm ? 1 : 0 })
-      .then(function (r) { A.store.set(TOKEN, r.token); A.store.set('tesr-last-user:emp', u); start(); })
+      .then(function (r) {
+        A.store.set('tesr-last-user:emp', u);
+        if (r.role === 'admin') { A.store.set('tesr-tc-admin', r.token); A.store.set('tesr-last-user:admin', u); location.href = 'admin.html'; return; } // บัญชีแอดมิน → ไปหน้าแอดมิน
+        A.store.set(TOKEN, r.token); start();
+      })
       .catch(function (e) { document.getElementById('lerr').innerHTML = '<div class="err">' + esc(e.message) + '</div>'; btn.disabled = false; });
   };
 }
@@ -81,7 +88,7 @@ function offline(msg, retry) {
 }
 function shell() {
   var tabs = [['home', 'หน้าแรก', 'home'], ['cal', 'ปฏิทิน', 'cal'], ['leave', 'การลา', 'leave'], ['me', 'โปรไฟล์', 'user']];
-  root.innerHTML = '<header class="emp-top"><div class="emp-top-in"><span class="logo" role="img" aria-label="TESR"></span><b>Time Clock</b><span class="small" style="margin-left:auto;color:var(--ink-muted)">' + esc(ME.settings.company) + '</span></div></header>' +
+  root.innerHTML = '<header class="emp-top"><div class="emp-top-in"><span class="logo" role="img" aria-label="TESR"></span><b>Time Clock</b><span class="vtag">' + esc(A.VERSION.split(' ')[0]) + '</span><span class="small" style="margin-left:auto;color:var(--ink-muted)">' + esc(ME.settings.company) + '</span></div></header>' +
     '<main class="emp-main" id="view"></main>' +
     '<nav class="tabbar" aria-label="เมนู"><div class="tabbar-in">' + tabs.map(function (t) {
       return '<button data-go="' + t[0] + '">' + A.ICON[t[2]] + t[1] + (t[0] === 'leave' && ME.pending ? '<span class="badge">' + ME.pending + '</span>' : '') + '</button>';
@@ -307,7 +314,8 @@ function vMe(el) {
     '<div class="row"><div class="field"><label for="pn">รหัสผ่านใหม่</label><input id="pn" type="password" autocomplete="new-password" minlength="6" required></div>' +
     '<div class="field"><label for="pn2">ยืนยัน</label><input id="pn2" type="password" autocomplete="new-password" minlength="6" required></div></div>' +
     '<div id="pwe"></div><button class="btn ghost" type="submit">บันทึกรหัสผ่านใหม่</button></form>' +
-    '<button class="btn danger block" id="lo">ออกจากระบบ</button>';
+    '<button class="btn danger block" id="lo">ออกจากระบบ</button>' +
+    '<div class="ver">TESR Time Clock ' + esc(A.VERSION) + '</div>';
   document.getElementById('ph').onchange = function (ev) {
     A.readPhoto(ev.target.files[0], 360, function (url) {
       api('photo', { data: url }).then(function (r) { ME.emp.photo = A.REMOTE ? r.url + '?v=' + Date.now() : url; A.toast('อัปเดตรูปโปรไฟล์แล้ว'); vMe(el); }).catch(function (e) { A.toast(e.message); });

@@ -8,6 +8,8 @@
 var APP = (function () {
   var API_URL = String(window.TESR_API_URL || '').trim();
   var REMOTE = !!API_URL;
+  /** เวอร์ชันของแอป — แสดงที่หน้าล็อกอินและในแอป (อัปเดตทุกครั้งที่ปล่อยเวอร์ชันใหม่) */
+  var VERSION = 'v1.7.0 (21 พ.ย. 2026)';
   var TH_M = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
   var TH_MF = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
   var TH_D = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
@@ -280,7 +282,7 @@ var APP = (function () {
   };
 
   return {
-    REMOTE: REMOTE, TH_M: TH_M, TH_MF: TH_MF, TH_D: TH_D, TH_DF: TH_DF, ST: ST, REQ: REQ, ICON: ICON,
+    VERSION: VERSION, REMOTE: REMOTE, TH_M: TH_M, TH_MF: TH_MF, TH_D: TH_D, TH_DF: TH_DF, ST: ST, REQ: REQ, ICON: ICON,
     pad: pad, ymd: ymd, hm: hm, esc: esc, thDate: thDate, thRange: thRange, thMonth: thMonth, addMonth: addMonth,
     fmtLate: fmtLate, fmtDays: fmtDays, avatar: avatar, person: person, pill: pill, stPill: stPill, reqPill: reqPill, leaveLabel: leaveLabel,
     store: store, toast: toast, makeApi: makeApi, calendar: calendar, readPhoto: readPhoto, modal: modal, closeModal: closeModal,

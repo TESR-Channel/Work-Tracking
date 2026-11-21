@@ -207,6 +207,9 @@ var TC = (function () {
       return { role: 'admin', token: sign(c, 'admin', 'admin', ver(c.A, c.S.adminHash), wantRemember(c.p)), mustChange: !c.S.adminHash, name: c.S.adminUser };
     }
     var e = emps(c.A).filter(function (x) { return isActive(x) && emailOf(x) === u; })[0];
+    // ใส่อีเมล/รหัสแอดมินที่หน้าพนักงาน → เข้าเป็นแอดมินให้เลย (หน้าเว็บจะพาไปหน้าแอดมินเอง)
+    if (!e && u === str(c.S.adminUser).toLowerCase() && c.S.adminHash && checkPw(c.A, c.S.adminHash, pw))
+      return { role: 'admin', token: sign(c, 'admin', 'admin', ver(c.A, c.S.adminHash), wantRemember(c.p)), mustChange: false, name: c.S.adminUser };
     if (!e || !empPwOk(c.A, e, pw)) { fail(); throw E('อีเมลหรือรหัสผ่านไม่ถูกต้อง'); }
     return { role: 'emp', token: sign(c, 'emp', e.id, ver(c.A, e.passHash), wantRemember(c.p)), emp: pubEmp(e) };
   }
